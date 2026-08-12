@@ -5,6 +5,7 @@ namespace Codify;
 
 use Codify\Controllers\AuthController;
 use Codify\Controllers\AcademicStructureController;
+use Codify\Controllers\AssessmentBankController;
 use Codify\Controllers\FacultySubjectController;
 use Codify\Controllers\FacultyTeachingController;
 use Codify\Controllers\ProblemBankController;
@@ -19,6 +20,7 @@ use Codify\Core\Router;
 use Codify\Repositories\SystemSettingRepository;
 use Codify\Repositories\StudentLearningRepository;
 use Codify\Repositories\AcademicStructureRepository;
+use Codify\Repositories\AssessmentBankRepository;
 use Codify\Repositories\FacultyScopeRepository;
 use Codify\Repositories\FacultyTeachingRepository;
 use Codify\Repositories\ProblemBankRepository;
@@ -29,6 +31,7 @@ use Codify\Services\AuthService;
 use Codify\Services\CodeExecutionRateLimiter;
 use Codify\Services\Judge0RunnerService;
 use Codify\Services\LoginRateLimiter;
+use Codify\Services\SyllabusStorageService;
 use PDO;
 
 final class Application
@@ -44,12 +47,14 @@ final class Application
         $users = new UserRepository($this->db);
         $guard = new AuthGuard($tokens, $users, $settings);
         $academic = new AcademicStructureRepository($this->db);
+        $assessmentBanks = new AssessmentBankRepository($this->db);
         $scopes = new FacultyScopeRepository($this->db);
         $teaching = new FacultyTeachingRepository($this->db);
         $problems = new ProblemBankRepository($this->db);
         $studentLearning = new StudentLearningRepository($this->db);
         $runnerConfig = require dirname(__DIR__) . '/config/runner.php';
         $runner = new Judge0RunnerService($runnerConfig);
+        $syllabus = new SyllabusStorageService(require dirname(__DIR__) . '/config/syllabus.php');
         $executionLimiter = new CodeExecutionRateLimiter($this->db);
         $authService = new AuthService($users, $tokens, $settings, new LoginRateLimiter($this->db));
         $controllers = [
@@ -59,9 +64,10 @@ final class Application
             'users' => new UserController($users, $tokens, $settings, $guard),
             'students' => new FacultyStudentController($users, $scopes, $tokens, $settings, $guard),
             'faculty_subjects' => new FacultySubjectController($scopes, $guard),
-            'faculty_teaching' => new FacultyTeachingController($teaching, $users, $settings, $guard),
+            'assessment_bank' => new AssessmentBankController($assessmentBanks, $settings, $guard),
+            'faculty_teaching' => new FacultyTeachingController($teaching, $users, $settings, $guard, $syllabus),
             'problem_bank' => new ProblemBankController($problems, $settings, $guard),
-            'student_learning' => new StudentLearningController($studentLearning, $settings, $guard, $executionLimiter, $runner, (int) $runnerConfig['rate_limit_per_minute']),
+            'student_learning' => new StudentLearningController($studentLearning, $settings, $guard, $executionLimiter, $runner, (int) $runnerConfig['rate_limit_per_minute'], $syllabus),
             'faculty_management' => new FacultyManagementController($users, $scopes, $tokens, $settings, $guard),
             'academic' => new AcademicStructureController($academic, $guard),
         ];

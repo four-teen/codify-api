@@ -55,6 +55,14 @@ final class StudentLearningRepository
         ];
     }
 
+    public function syllabus(int $studentId, int $offeringId, string $academicYear, string $academicTerm): array
+    {
+        $statement = $this->db->prepare('SELECT syllabus.faculty_subject_id, syllabus.original_name, syllabus.stored_name, syllabus.mime_type, syllabus.size_bytes, syllabus.uploaded_at, syllabus.updated_at FROM faculty_subject_syllabi syllabus INNER JOIN faculty_subjects fs ON fs.id = syllabus.faculty_subject_id INNER JOIN faculty_subject_students enrollment ON enrollment.faculty_subject_id = fs.id WHERE enrollment.student_id = :student AND fs.id = :offering AND fs.is_active = 1 AND fs.academic_year = :academic_year AND fs.academic_term = :academic_term LIMIT 1');
+        $statement->execute(['student' => $studentId, 'offering' => $offeringId, 'academic_year' => $academicYear, 'academic_term' => $academicTerm]);
+        $row = $statement->fetch(); if (!$row) throw new HttpException(404, 'No syllabus PDF is available for this enrolled subject.');
+        $row['faculty_subject_id'] = (int) $row['faculty_subject_id']; $row['size_bytes'] = (int) $row['size_bytes']; return $row;
+    }
+
     public function subjects(int $studentId, string $academicYear, string $academicTerm): array
     {
         $statement = $this->db->prepare("SELECT fs.id, fs.section, fs.class_schedule, fs.academic_year, fs.academic_term,
@@ -63,6 +71,7 @@ final class StudentLearningRepository
             co.code AS college_code, co.name AS college_name,
             faculty.name AS instructor_name, faculty.email AS instructor_email,
             fss.source, fss.created_at AS enrolled_at,
+            syllabus.original_name AS syllabus_original_name, syllabus.size_bytes AS syllabus_size_bytes, syllabus.uploaded_at AS syllabus_uploaded_at,
             (SELECT COUNT(DISTINCT cps.problem_id)
                 FROM coding_problem_subjects cps
                 INNER JOIN coding_problems cp ON cp.id = cps.problem_id AND cp.is_active = 1
@@ -73,6 +82,7 @@ final class StudentLearningRepository
             INNER JOIN programs p ON p.id = s.program_id
             INNER JOIN colleges co ON co.id = p.college_id
             INNER JOIN users faculty ON faculty.id = fs.faculty_id
+            LEFT JOIN faculty_subject_syllabi syllabus ON syllabus.faculty_subject_id = fs.id
             WHERE fss.student_id = :student AND fs.is_active = 1
               AND fs.academic_year = :academic_year AND fs.academic_term = :academic_term
             ORDER BY p.code, s.code, fs.section");
@@ -215,6 +225,7 @@ final class StudentLearningRepository
             'program_id' => (int) $row['program_id'], 'program_code' => $row['program_code'], 'program_name' => $row['program_name'],
             'college_code' => $row['college_code'], 'college_name' => $row['college_name'],
             'instructor_name' => $row['instructor_name'], 'instructor_email' => $row['instructor_email'],
+            'syllabus' => $row['syllabus_original_name'] === null ? null : ['original_name' => $row['syllabus_original_name'], 'size_bytes' => (int) $row['syllabus_size_bytes'], 'uploaded_at' => $row['syllabus_uploaded_at']],
             'source' => $row['source'], 'enrolled_at' => $row['enrolled_at'], 'problems_count' => (int) $row['problems_count'],
         ];
     }

@@ -11,6 +11,7 @@ use Codify\Repositories\SystemSettingRepository;
 use Codify\Services\AuthGuard;
 use Codify\Services\CodeExecutionRateLimiter;
 use Codify\Services\Judge0RunnerService;
+use Codify\Services\SyllabusStorageService;
 use Codify\Support\Validator;
 
 final class StudentLearningController
@@ -21,9 +22,10 @@ final class StudentLearningController
     private $executionLimiter;
     private $runner;
     private $executionLimit;
+    private $syllabus;
 
-    public function __construct(StudentLearningRepository $learning, SystemSettingRepository $settings, AuthGuard $guard, CodeExecutionRateLimiter $executionLimiter, Judge0RunnerService $runner, int $executionLimit)
-    { $this->learning = $learning; $this->settings = $settings; $this->guard = $guard; $this->executionLimiter = $executionLimiter; $this->runner = $runner; $this->executionLimit = $executionLimit; }
+    public function __construct(StudentLearningRepository $learning, SystemSettingRepository $settings, AuthGuard $guard, CodeExecutionRateLimiter $executionLimiter, Judge0RunnerService $runner, int $executionLimit, SyllabusStorageService $syllabus)
+    { $this->learning = $learning; $this->settings = $settings; $this->guard = $guard; $this->executionLimiter = $executionLimiter; $this->runner = $runner; $this->executionLimit = $executionLimit; $this->syllabus = $syllabus; }
 
     public function overview(Request $request): void
     {
@@ -41,6 +43,13 @@ final class StudentLearningController
     {
         $student = $this->student($request); $term = $this->term();
         Response::success($this->learning->subjectDashboard((int) $student['id'], $this->subjectId($request), $term['academic_year'], $term['academic_term']));
+    }
+
+    public function showSyllabus(Request $request): void
+    {
+        $student = $this->student($request); $term = $this->term();
+        $syllabus = $this->learning->syllabus((int) $student['id'], $this->subjectId($request), $term['academic_year'], $term['academic_term']);
+        $this->syllabus->stream($syllabus);
     }
 
     public function problems(Request $request): void

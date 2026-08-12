@@ -11,6 +11,7 @@ use Codify\Repositories\SystemSettingRepository;
 use Codify\Repositories\UserRepository;
 use Codify\Services\AuthGuard;
 use Codify\Support\Validator;
+use Codify\Services\SyllabusStorageService;
 
 final class FacultyTeachingController
 {
@@ -18,9 +19,10 @@ final class FacultyTeachingController
     private $users;
     private $settings;
     private $guard;
+    private $syllabus;
 
-    public function __construct(FacultyTeachingRepository $teaching, UserRepository $users, SystemSettingRepository $settings, AuthGuard $guard)
-    { $this->teaching = $teaching; $this->users = $users; $this->settings = $settings; $this->guard = $guard; }
+    public function __construct(FacultyTeachingRepository $teaching, UserRepository $users, SystemSettingRepository $settings, AuthGuard $guard, SyllabusStorageService $syllabus)
+    { $this->teaching = $teaching; $this->users = $users; $this->settings = $settings; $this->guard = $guard; $this->syllabus = $syllabus; }
 
     public function index(Request $request): void
     {
@@ -32,8 +34,9 @@ final class FacultyTeachingController
     {
         $faculty = $this->faculty($request); $input = $request->json(); $v = new Validator($input);
         $subjectId = $v->integer('subject_id', 1, PHP_INT_MAX, 0); $section = $v->optionalString('section', 100); $schedule = $v->optionalString('class_schedule', 255); $v->throwIfFailed();
+        $section = $this->upper($section === null ? '' : $section); $schedule = $schedule === null ? null : $this->upper($schedule);
         $settings = $this->settings->current();
-        $offering = $this->teaching->createOffering((int) $faculty['id'], $subjectId, $section === null ? '' : $section, $schedule, $settings['academic_year'], $settings['academic_term']);
+        $offering = $this->teaching->createOffering((int) $faculty['id'], $subjectId, $section, $schedule, $settings['academic_year'], $settings['academic_term']);
         Response::success($offering, 'Subject added to your teaching list.', 201);
     }
 
@@ -43,9 +46,34 @@ final class FacultyTeachingController
         Response::success(['offering' => $this->teaching->offering((int) $faculty['id'], $id), 'students' => $this->teaching->students((int) $faculty['id'], $id)]);
     }
 
+    public function uploadSyllabus(Request $request): void
+    {
+        $faculty = $this->faculty($request); $offeringId = $this->offeringId($request);
+        $previous = $this->teaching->syllabus((int) $faculty['id'], $offeringId); $stored = $this->syllabus->store($request->file('syllabus'));
+        try { $offering = $this->teaching->saveSyllabus((int) $faculty['id'], $offeringId, $stored); }
+        catch (\Throwable $exception) { $this->syllabus->delete($stored['stored_name']); throw $exception; }
+        if ($previous !== null && $previous['stored_name'] !== $stored['stored_name']) $this->syllabus->delete($previous['stored_name']);
+        Response::success($offering, $previous === null ? 'Syllabus PDF uploaded.' : 'Syllabus PDF replaced.', $previous === null ? 201 : 200);
+    }
+
+    public function showSyllabus(Request $request): void
+    {
+        $faculty = $this->faculty($request); $syllabus = $this->teaching->syllabus((int) $faculty['id'], $this->offeringId($request));
+        if ($syllabus === null) throw new HttpException(404, 'No syllabus PDF has been uploaded for this subject.');
+        $this->syllabus->stream($syllabus);
+    }
+
+    public function destroySyllabus(Request $request): void
+    {
+        $faculty = $this->faculty($request); $syllabus = $this->teaching->removeSyllabus((int) $faculty['id'], $this->offeringId($request));
+        if ($syllabus === null) throw new HttpException(404, 'No syllabus PDF has been uploaded for this subject.');
+        $this->syllabus->delete($syllabus['stored_name']); Response::success([], 'Syllabus PDF removed.');
+    }
+
     public function destroy(Request $request): void
     {
-        $faculty = $this->faculty($request); $this->teaching->deleteOffering((int) $faculty['id'], $this->offeringId($request));
+        $faculty = $this->faculty($request); $offeringId = $this->offeringId($request); $syllabus = $this->teaching->syllabus((int) $faculty['id'], $offeringId);
+        $this->teaching->deleteOffering((int) $faculty['id'], $offeringId); if ($syllabus !== null) $this->syllabus->delete($syllabus['stored_name']);
         Response::success([], 'Faculty subject removed.');
     }
 
@@ -176,5 +204,6 @@ final class FacultyTeachingController
     private function offeringId(Request $request): int { return $this->routeId($request, 'offering', 'Faculty subject not found.'); }
     private function studentId(Request $request): int { return $this->routeId($request, 'student', 'Student not found.'); }
     private function routeId(Request $request, string $key, string $message): int { $id = filter_var($request->route($key), FILTER_VALIDATE_INT); if ($id === false || $id < 1) throw new HttpException(404, $message); return (int) $id; }
+    private function upper(string $value): string { return function_exists('mb_strtoupper') ? mb_strtoupper(trim($value), 'UTF-8') : strtoupper(trim($value)); }
     private function hash(string $password): string { return password_hash($password, PASSWORD_BCRYPT, ['cost' => max(10, min(14, (int) env('BCRYPT_ROUNDS', '12')))]); }
 }
