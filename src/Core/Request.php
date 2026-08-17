@@ -39,6 +39,7 @@ final class Request
     public function method(): string { return $this->method; }
     public function path(): string { return $this->path; }
     public function query(string $key, $default = null) { return array_key_exists($key, $this->query) ? $this->query[$key] : $default; }
+    public function file(string $key): ?array { return isset($_FILES[$key]) && is_array($_FILES[$key]) ? $_FILES[$key] : null; }
 
     public function json(): array
     {

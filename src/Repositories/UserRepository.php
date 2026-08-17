@@ -21,6 +21,22 @@ final class UserRepository
         return $row ? $this->cast($row) : null;
     }
 
+    public function findByUsername(string $username): ?array
+    {
+        $statement = $this->db->prepare('SELECT * FROM users WHERE username = :username LIMIT 1');
+        $statement->execute(['username' => $username]);
+        $row = $statement->fetch();
+        return $row ? $this->cast($row) : null;
+    }
+
+    public function findByEmail(string $email): ?array
+    {
+        $statement = $this->db->prepare('SELECT * FROM users WHERE email = :email LIMIT 1');
+        $statement->execute(['email' => strtolower($email)]);
+        $row = $statement->fetch();
+        return $row ? $this->cast($row) : null;
+    }
+
     public function find(int $id): ?array
     {
         $statement = $this->db->prepare('SELECT * FROM users WHERE id = :id LIMIT 1');
@@ -38,6 +54,8 @@ final class UserRepository
             'role' => $user['role'], 'is_active' => (bool) $user['is_active'], 'must_change_password' => (bool) $user['must_change_password'],
             'permissions' => $statement->fetchAll(PDO::FETCH_COLUMN),
         ];
+        if (array_key_exists('first_name', $user)) $payload['first_name'] = $user['first_name'];
+        if (array_key_exists('last_name', $user)) $payload['last_name'] = $user['last_name'];
         if (array_key_exists('faculty_id', $user)) $payload['faculty_id'] = $user['faculty_id'] === null ? null : (int) $user['faculty_id'];
         if (array_key_exists('created_at', $user)) $payload['created_at'] = $user['created_at'];
         if (array_key_exists('updated_at', $user)) $payload['updated_at'] = $user['updated_at'];
@@ -87,38 +105,42 @@ final class UserRepository
 
     public function create(array $attributes, array $permissionCodes = []): array
     {
-        $this->db->beginTransaction();
+        $ownsTransaction = !$this->db->inTransaction();
+        if ($ownsTransaction) $this->db->beginTransaction();
         try {
-            $statement = $this->db->prepare('INSERT INTO users (faculty_id, name, username, email, password, role, is_active, must_change_password, created_at, updated_at) VALUES (:faculty_id, :name, :username, :email, :password, :role, :is_active, :must_change_password, NOW(), NOW())');
+            $statement = $this->db->prepare('INSERT INTO users (faculty_id, first_name, last_name, name, username, email, password, role, is_active, must_change_password, created_at, updated_at) VALUES (:faculty_id, :first_name, :last_name, :name, :username, :email, :password, :role, :is_active, :must_change_password, NOW(), NOW())');
             $statement->execute([
-                'faculty_id' => $attributes['faculty_id'] ?? null, 'name' => $attributes['name'], 'username' => $attributes['username'],
+                'faculty_id' => $attributes['faculty_id'] ?? null, 'first_name' => $attributes['first_name'] ?? null, 'last_name' => $attributes['last_name'] ?? null, 'name' => $attributes['name'], 'username' => $attributes['username'],
                 'email' => $attributes['email'], 'password' => $attributes['password'], 'role' => $attributes['role'],
                 'is_active' => $attributes['is_active'] ? 1 : 0, 'must_change_password' => $attributes['must_change_password'] ? 1 : 0,
             ]);
             $id = (int) $this->db->lastInsertId();
             $this->syncPermissions($id, $permissionCodes);
-            $this->db->commit();
+            if ($ownsTransaction) $this->db->commit();
             return $this->find($id) ?: [];
         } catch (Throwable $exception) {
-            if ($this->db->inTransaction()) $this->db->rollBack();
+            if ($ownsTransaction && $this->db->inTransaction()) $this->db->rollBack();
             throw $exception;
         }
     }
 
     public function update(int $id, array $attributes, ?array $permissionCodes = null): array
     {
-        $this->db->beginTransaction();
+        $ownsTransaction = !$this->db->inTransaction();
+        if ($ownsTransaction) $this->db->beginTransaction();
         try {
             $sets = ['name = :name', 'username = :username', 'email = :email', 'role = :role', 'is_active = :is_active', 'updated_at = NOW()'];
             $parameters = ['id' => $id, 'name' => $attributes['name'], 'username' => $attributes['username'], 'email' => $attributes['email'], 'role' => $attributes['role'], 'is_active' => $attributes['is_active'] ? 1 : 0];
+            if (array_key_exists('first_name', $attributes)) { $sets[] = 'first_name = :first_name'; $parameters['first_name'] = $attributes['first_name']; }
+            if (array_key_exists('last_name', $attributes)) { $sets[] = 'last_name = :last_name'; $parameters['last_name'] = $attributes['last_name']; }
             if (!empty($attributes['password'])) { $sets[] = 'password = :password'; $sets[] = 'must_change_password = :must_change'; $parameters['password'] = $attributes['password']; $parameters['must_change'] = $attributes['must_change_password'] ? 1 : 0; }
             $statement = $this->db->prepare('UPDATE users SET ' . implode(', ', $sets) . ' WHERE id = :id');
             $statement->execute($parameters);
             if ($permissionCodes !== null) $this->syncPermissions($id, $permissionCodes);
-            $this->db->commit();
+            if ($ownsTransaction) $this->db->commit();
             return $this->find($id) ?: [];
         } catch (Throwable $exception) {
-            if ($this->db->inTransaction()) $this->db->rollBack();
+            if ($ownsTransaction && $this->db->inTransaction()) $this->db->rollBack();
             throw $exception;
         }
     }
