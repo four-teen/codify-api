@@ -40,5 +40,19 @@ final class TokenRepository
 
     public function delete(int $tokenId): void { $this->db->prepare('DELETE FROM personal_access_tokens WHERE id = :id')->execute(['id' => $tokenId]); }
     public function revokeAll(int $userId): void { $this->db->prepare('DELETE FROM personal_access_tokens WHERE tokenable_id = :id')->execute(['id' => $userId]); }
+    public function activeCount(int $userId): int
+    {
+        $statement = $this->db->prepare('SELECT COUNT(*) FROM personal_access_tokens WHERE tokenable_id = :id AND (expires_at IS NULL OR expires_at > NOW())');
+        $statement->execute(['id' => $userId]);
+        return (int) $statement->fetchColumn();
+    }
     public function revokeOthers(int $userId, int $currentTokenId): void { $this->db->prepare('DELETE FROM personal_access_tokens WHERE tokenable_id = :user AND id <> :token')->execute(['user' => $userId, 'token' => $currentTokenId]); }
+    public function revokeIds(int $userId, array $tokenIds): void
+    {
+        $ids = array_values(array_unique(array_filter(array_map('intval', $tokenIds), static function (int $id): bool { return $id > 0; })));
+        if ($ids === []) return;
+        $placeholders = implode(',', array_fill(0, count($ids), '?'));
+        $statement = $this->db->prepare('DELETE FROM personal_access_tokens WHERE tokenable_id = ? AND id IN (' . $placeholders . ')');
+        $statement->execute(array_merge([$userId], $ids));
+    }
 }

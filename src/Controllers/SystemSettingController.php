@@ -28,9 +28,12 @@ final class SystemSettingController
         if ($v->has('timezone')) { $values['timezone'] = $v->requiredString('timezone', 80); if (!in_array($values['timezone'], timezone_identifiers_list(), true)) $v->add('timezone', 'The selected timezone is invalid.'); }
         if ($v->has('academic_year')) { $values['academic_year'] = $v->requiredString('academic_year', 20); if (preg_match('/^\d{4}-\d{4}$/', $values['academic_year']) !== 1) $v->add('academic_year', 'Use the academic year format YYYY-YYYY.'); }
         if ($v->has('academic_term')) $values['academic_term'] = $v->requiredString('academic_term', 100);
-        foreach (['faculty_student_management_enabled', 'temporary_password_change_required', 'maintenance_mode', 'announcement_enabled'] as $field) if ($v->has($field)) $values[$field] = $v->boolean($field, (bool) $current[$field]);
+        foreach (['faculty_student_management_enabled', 'temporary_password_change_required', 'device_consistency_enabled', 'device_consent_required', 'maintenance_mode', 'announcement_enabled'] as $field) if ($v->has($field)) $values[$field] = $v->boolean($field, (bool) $current[$field]);
         if ($v->has('session_timeout_minutes')) $values['session_timeout_minutes'] = $v->integer('session_timeout_minutes', 15, 1440, (int) $current['session_timeout_minutes']);
         if ($v->has('max_failed_login_attempts')) $values['max_failed_login_attempts'] = $v->integer('max_failed_login_attempts', 3, 20, (int) $current['max_failed_login_attempts']);
+        if ($v->has('device_retention_days')) $values['device_retention_days'] = $v->integer('device_retention_days', 30, 365, (int) $current['device_retention_days']);
+        if ($v->has('device_policy_version')) $values['device_policy_version'] = $v->requiredString('device_policy_version', 40);
+        if ($v->has('device_notice')) $values['device_notice'] = $v->requiredString('device_notice', 1500);
         if ($v->has('announcement_message')) $values['announcement_message'] = $v->optionalString('announcement_message', 500);
         $announcementEnabled = $values['announcement_enabled'] ?? $current['announcement_enabled'];
         $announcementMessage = array_key_exists('announcement_message', $values) ? $values['announcement_message'] : $current['announcement_message'];

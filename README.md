@@ -34,3 +34,21 @@ The administrator starts with `must_change_password=true`. Remove `CODIFY_INITIA
 - Faculty-owned student management
 
 The API uses prepared PDO statements, Bcrypt passwords, hashed expiring tokens, login throttling, strict role/ownership checks, maintenance and password gates, CORS allowlisting, validation, and security headers.
+
+## Student device consistency
+
+Existing installations should import `database/device-consistency.sql` once. Set `DEVICE_FINGERPRINT_KEY` to a private random value of at least 32 characters, then enable device consistency from administrator system settings. The setting is disabled by default and student acknowledgment is required by default.
+
+The feature stores student-scoped HMAC signatures of coarse browser characteristics and public P-256 device keys. Browser private keys remain non-exportable in IndexedDB. It does not collect biometric fingerprints, precise location, browsing history, raw IP addresses, or student files.
+
+When acknowledgment is required, student workspace endpoints remain locked until the current policy notice is accepted. Declining records the decision and revokes the current login session; after acceptance, collection continues in the background without a student-facing fingerprint dashboard.
+
+Useful validation commands are `php tests/unit-smoke.php`, `php tests/device-repository-smoke.php`, and `php tests/device-api-smoke.php`.
+
+## Administrator student audit
+
+Existing installations that already imported the device-consistency migration should also import `database/administrator-student-audit.sql` once. New installations receive the table through either full schema.
+
+Administrator-only endpoints under `/api/v1/admin/student-audit` provide the complete student directory, last-name/email/student-ID/database-ID search, per-student fingerprint and login-event dashboards, session revocation, recorded-login cleanup, individual device removal, and full fingerprint reset. Cleanup operations are recorded in a separate administrator audit trail that is not erased with device data.
+
+Run `php tests/administrator-student-audit-api-smoke.php` to validate the directory, authorization, searches, dashboard, login cleanup, and fingerprint reset against temporary accounts.

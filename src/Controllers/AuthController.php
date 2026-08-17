@@ -31,20 +31,20 @@ final class AuthController
 
     public function me(Request $request): void
     {
-        $user = $this->guard->authenticate($request);
+        $user = $this->guard->authenticate($request, false, null, false, true);
         Response::success($this->users->payload($user));
     }
 
     public function logout(Request $request): void
     {
-        $user = $this->guard->authenticate($request);
+        $user = $this->guard->authenticate($request, false, null, false, true);
         $this->tokens->delete((int) $user['_token_id']);
         Response::success([], 'Signed out successfully.');
     }
 
     public function changePassword(Request $request): void
     {
-        $user = $this->guard->authenticate($request); $input = $request->json(); $validator = new Validator($input);
+        $user = $this->guard->authenticate($request, false, null, false, true); $input = $request->json(); $validator = new Validator($input);
         $current = (string) ($input['current_password'] ?? '');
         if ($current === '') $validator->add('current_password', 'The current password field is required.');
         $password = $validator->password(true); $validator->throwIfFailed();

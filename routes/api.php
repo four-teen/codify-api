@@ -36,6 +36,13 @@ return static function ($router, array $controllers): void {
     $router->patch($prefix . '/admin/faculty/{faculty}', [$controllers['faculty_management'], 'update']);
     $router->delete($prefix . '/admin/faculty/{faculty}', [$controllers['faculty_management'], 'destroy']);
 
+    $router->get($prefix . '/admin/student-audit', [$controllers['administrator_student_audit'], 'index']);
+    $router->get($prefix . '/admin/student-audit/{student}', [$controllers['administrator_student_audit'], 'show']);
+    $router->delete($prefix . '/admin/student-audit/{student}/login-events', [$controllers['administrator_student_audit'], 'clearLoginEvents']);
+    $router->delete($prefix . '/admin/student-audit/{student}/devices', [$controllers['administrator_student_audit'], 'resetDevices']);
+    $router->delete($prefix . '/admin/student-audit/{student}/devices/{device}', [$controllers['administrator_student_audit'], 'destroyDevice']);
+    $router->post($prefix . '/admin/student-audit/{student}/revoke-sessions', [$controllers['administrator_student_audit'], 'revokeSessions']);
+
     $router->get($prefix . '/faculty/subjects', [$controllers['faculty_subjects'], 'index']);
     $router->get($prefix . '/faculty/problem-bank', [$controllers['problem_bank'], 'index']);
     $router->post($prefix . '/faculty/problem-bank', [$controllers['problem_bank'], 'store']);
@@ -55,6 +62,16 @@ return static function ($router, array $controllers): void {
     $router->get($prefix . '/student/problems', [$controllers['student_learning'], 'problems']);
     $router->get($prefix . '/student/problems/{problem}', [$controllers['student_learning'], 'showProblem']);
     $router->post($prefix . '/student/problems/{problem}/run', [$controllers['student_learning'], 'runProblem']);
+    $router->get($prefix . '/student/device-consistency', [$controllers['student_devices'], 'overview']);
+    $router->post($prefix . '/student/device-consistency/consent', [$controllers['student_devices'], 'consent']);
+    $router->post($prefix . '/student/device-consistency/decline', [$controllers['student_devices'], 'decline']);
+    $router->delete($prefix . '/student/device-consistency/consent', [$controllers['student_devices'], 'withdraw']);
+    $router->post($prefix . '/student/device-consistency/register', [$controllers['student_devices'], 'register']);
+    $router->post($prefix . '/student/device-consistency/challenge', [$controllers['student_devices'], 'challenge']);
+    $router->post($prefix . '/student/device-consistency/verify', [$controllers['student_devices'], 'verify']);
+    $router->patch($prefix . '/student/devices/{device}/recognize', [$controllers['student_devices'], 'recognize']);
+    $router->post($prefix . '/student/devices/{device}/report', [$controllers['student_devices'], 'report']);
+    $router->delete($prefix . '/student/devices/{device}', [$controllers['student_devices'], 'destroy']);
     $router->get($prefix . '/faculty/subject-offerings', [$controllers['faculty_teaching'], 'index']);
     $router->post($prefix . '/faculty/subject-offerings', [$controllers['faculty_teaching'], 'store']);
     $router->post($prefix . '/faculty/subject-offerings/{offering}/syllabus', [$controllers['faculty_teaching'], 'uploadSyllabus']);
