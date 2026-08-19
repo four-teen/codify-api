@@ -9,6 +9,8 @@ use Throwable;
 
 final class DeviceConsistencyRepository
 {
+    private const BROWSER_SIGNALS_KEY = '{"codify_mode":"browser_signals","version":1}';
+
     /** @var PDO */
     private $db;
     public function __construct(PDO $db) { $this->db = $db; }
@@ -112,6 +114,23 @@ final class DeviceConsistencyRepository
             'os_label' => $fingerprint['os_label'], 'device_type' => $fingerprint['device_type'], 'status' => $status,
         ]);
         return $this->findOwnedDevice($studentId, (int) $this->db->lastInsertId());
+    }
+
+    public function createObservedDevice(int $studentId, string $credentialId, array $fingerprint, string $status): array
+    {
+        return $this->createDevice($studentId, $credentialId, self::BROWSER_SIGNALS_KEY, $fingerprint, $status);
+    }
+
+    public function usesBrowserSignals(array $device): bool
+    {
+        return $this->verificationMethod((string) ($device['public_key_jwk'] ?? '')) === 'browser_signals';
+    }
+
+    public function promoteToBrowserKey(int $studentId, int $deviceId, string $publicKey): void
+    {
+        $statement = $this->db->prepare('UPDATE student_devices SET public_key_jwk = :public_key, updated_at = NOW() WHERE id = :device AND student_id = :student');
+        $statement->execute(['public_key' => $publicKey, 'device' => $deviceId, 'student' => $studentId]);
+        if ($statement->rowCount() < 1) $this->findOwnedDevice($studentId, $deviceId);
     }
 
     public function updateStatus(int $studentId, int $deviceId, string $status): void
@@ -221,6 +240,13 @@ final class DeviceConsistencyRepository
             'last_verified_at' => $row['last_verified_at'], 'seen_count' => (int) $row['seen_count'],
             'sessions_count' => isset($row['sessions_count']) ? (int) $row['sessions_count'] : 0,
             'latest_match_status' => $row['latest_match_status'] ?? null,
+            'verification_method' => $this->verificationMethod((string) ($row['public_key_jwk'] ?? '')),
         ];
+    }
+
+    private function verificationMethod(string $publicKey): string
+    {
+        $decoded = json_decode($publicKey, true);
+        return is_array($decoded) && ($decoded['codify_mode'] ?? '') === 'browser_signals' ? 'browser_signals' : 'browser_key';
     }
 }

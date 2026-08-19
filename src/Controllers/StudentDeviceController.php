@@ -68,8 +68,16 @@ final class StudentDeviceController
         $publicKey = $this->credentials->normalizeJwk(is_array($input['public_key_jwk'] ?? null) ? $input['public_key_jwk'] : []);
         $existing = $this->devices->findAnyByCredential($credentialId);
         if ($existing) {
-            if ((int) $existing['student_id'] !== $studentId || !hash_equals((string) $existing['public_key_jwk'], $publicKey)) throw new HttpException(409, 'This browser security key is already registered to another account.');
-            Response::success(['registered' => false, 'requires_verification' => true, 'overview' => $this->overviewData($studentId, $settings)]);
+            if ((int) $existing['student_id'] !== $studentId) throw new HttpException(409, 'This browser identifier is already registered to another account.');
+            if (in_array($existing['status'], ['revoked', 'reported'], true)) throw new HttpException(409, 'This browser record cannot be reused. Reset its stored Codify data and try again.', [], 'DEVICE_RECORD_INACTIVE');
+            $upgraded = false;
+            if ($this->devices->usesBrowserSignals($existing)) {
+                $this->devices->promoteToBrowserKey($studentId, (int) $existing['id'], $publicKey);
+                $upgraded = true;
+            } elseif (!hash_equals((string) $existing['public_key_jwk'], $publicKey)) {
+                throw new HttpException(409, 'This browser security key does not match its registered key.', [], 'DEVICE_KEY_MISMATCH');
+            }
+            Response::success(['registered' => false, 'upgraded' => $upgraded, 'requires_verification' => true, 'overview' => $this->overviewData($studentId, $settings)]);
         }
         $fingerprint = $this->fingerprints->build($studentId, $signals);
         $first = $this->devices->deviceCount($studentId) === 0;
@@ -77,6 +85,28 @@ final class StudentDeviceController
         $device = $this->devices->createDevice($studentId, $credentialId, $publicKey, $fingerprint, $first ? 'recognized' : 'new');
         $this->devices->recordSession($studentId, (int) $device['id'], (int) $student['_token_id'], $first ? 'first_seen' : 'new', [], $this->fingerprints->networkHash($studentId, $request->ip()), $fingerprint);
         Response::success(['registered' => true, 'possible_browser_reset' => $possibleReset, 'overview' => $this->overviewData($studentId, $settings)], $first ? 'This is your first recognized device.' : 'A new device was recorded for your account.', 201);
+    }
+
+    public function observe(Request $request): void
+    {
+        $student = $this->student($request); $settings = $this->readySettings((int) $student['id']); $input = $request->json();
+        $studentId = (int) $student['id']; $tokenId = (int) $student['_token_id'];
+        $credentialId = $this->credentialId($input); $fingerprint = $this->fingerprints->build($studentId, $this->signals($input));
+        $existing = $this->devices->findAnyByCredential($credentialId);
+        if ($existing) {
+            if ((int) $existing['student_id'] !== $studentId) throw new HttpException(409, 'This browser identifier is already registered to another account.');
+            if (!$this->devices->usesBrowserSignals($existing)) throw new HttpException(409, 'This browser already has a protected security key.', [], 'DEVICE_KEY_REQUIRED');
+            if (in_array($existing['status'], ['revoked', 'reported'], true)) throw new HttpException(409, 'This browser record cannot be reused. Reset its stored Codify data and try again.', [], 'DEVICE_RECORD_INACTIVE');
+            $changed = hash_equals((string) $existing['fingerprint_hash'], (string) $fingerprint['fingerprint_hash']) ? [] : $this->fingerprints->changedComponents((string) $existing['component_hashes'], $fingerprint['component_hashes']);
+            $match = $existing['status'] === 'new' ? 'new' : ($changed === [] ? 'recognized' : 'changed');
+            $this->devices->recordSession($studentId, (int) $existing['id'], $tokenId, $match, $changed, $this->fingerprints->networkHash($studentId, $request->ip()), $fingerprint);
+            Response::success(['registered' => false, 'verification_method' => 'browser_signals', 'overview' => $this->overviewData($studentId, $settings)], 'This browser was recorded in compatibility mode.');
+        }
+        $first = $this->devices->deviceCount($studentId) === 0;
+        $possibleReset = $this->devices->findByFingerprint($studentId, $fingerprint['fingerprint_hash']) !== null;
+        $device = $this->devices->createObservedDevice($studentId, $credentialId, $fingerprint, $first ? 'recognized' : 'new');
+        $this->devices->recordSession($studentId, (int) $device['id'], $tokenId, $first ? 'first_seen' : 'new', [], $this->fingerprints->networkHash($studentId, $request->ip()), $fingerprint);
+        Response::success(['registered' => true, 'possible_browser_reset' => $possibleReset, 'verification_method' => 'browser_signals', 'overview' => $this->overviewData($studentId, $settings)], $first ? 'This browser was recorded as the first observed device.' : 'A new browser was recorded in compatibility mode.', 201);
     }
 
     public function challenge(Request $request): void

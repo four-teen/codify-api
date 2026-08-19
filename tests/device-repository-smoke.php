@@ -10,9 +10,10 @@ require dirname(__DIR__) . '/bootstrap/autoload.php';
 $db = Connection::make(); $db->beginTransaction();
 try {
     $suffix = bin2hex(random_bytes(5));
+    $passwordHash = password_hash(bin2hex(random_bytes(24)), PASSWORD_BCRYPT);
     $sql = 'INSERT INTO users (faculty_id, first_name, last_name, name, username, email, password, role, is_active, must_change_password, created_at, updated_at) VALUES (NULL, \'Device\', \'Test\', \'Device Test\', :username, :email, :password, \'student\', 1, 0, NOW(), NOW())';
     $statement = $db->prepare($sql);
-    $statement->execute(['username' => 'device-test-' . $suffix, 'email' => 'device-test-' . $suffix . '@example.test', 'password' => password_hash('temporary-test-password-123', PASSWORD_BCRYPT)]);
+    $statement->execute(['username' => 'device-test-' . $suffix, 'email' => 'device-test-' . $suffix . '@example.test', 'password' => $passwordHash]);
     $studentId = (int) $db->lastInsertId();
     $sql = 'INSERT INTO personal_access_tokens (tokenable_type, tokenable_id, name, token, abilities, expires_at, created_at, updated_at) VALUES (\'Codify\\\\User\', :student, \'device-test\', :token, :abilities, DATE_ADD(NOW(), INTERVAL 1 HOUR), NOW(), NOW())';
     $statement = $db->prepare($sql);
@@ -29,7 +30,11 @@ try {
     ];
     $fingerprint = $service->build($studentId, $signals);
     $repository->recordConsent($studentId, 'test', 'granted', hash('sha256', 'notice'), null);
-    $device = $repository->createDevice($studentId, str_repeat('c', 43), json_encode(['kty' => 'EC']), $fingerprint, 'recognized');
+    $device = $repository->createObservedDevice($studentId, str_repeat('c', 43), $fingerprint, 'recognized');
+    if (!$repository->usesBrowserSignals($device)) throw new RuntimeException('Compatibility device mode was not stored.');
+    $repository->promoteToBrowserKey($studentId, (int) $device['id'], json_encode(['kty' => 'EC']));
+    $device = $repository->findOwnedDevice($studentId, (int) $device['id']);
+    if ($repository->usesBrowserSignals($device)) throw new RuntimeException('Compatibility device was not promoted to a browser key.');
     $repository->recordSession($studentId, (int) $device['id'], $tokenId, 'first_seen', [], null, $fingerprint);
     $challenge = $repository->createChallenge($studentId, (int) $device['id'], $tokenId);
     $repository->consumeChallenge($challenge['id'], $studentId, (int) $device['id'], $tokenId);

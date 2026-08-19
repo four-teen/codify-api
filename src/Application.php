@@ -69,6 +69,7 @@ final class Application
         $administratorStudentAudit = new AdministratorStudentAuditRepository($this->db);
         $administratorAuditLogs = new AdministratorAuditLogRepository($this->db);
         $administratorDataCleanup = new AdministratorDataCleanupRepository($this->db);
+        $fingerprints = new DeviceFingerprintService();
         $runnerConfig = require dirname(__DIR__) . '/config/runner.php';
         $runner = new Judge0RunnerService($runnerConfig);
         $syllabus = new SyllabusStorageService(require dirname(__DIR__) . '/config/syllabus.php');
@@ -85,8 +86,8 @@ final class Application
             'faculty_teaching' => new FacultyTeachingController($teaching, $users, $tokens, $settings, $guard, $syllabus),
             'problem_bank' => new ProblemBankController($problems, $settings, $guard),
             'student_learning' => new StudentLearningController($studentLearning, $settings, $guard, $executionLimiter, $runner, (int) $runnerConfig['rate_limit_per_minute'], $syllabus),
-            'student_devices' => new StudentDeviceController($deviceConsistency, $settings, $tokens, $guard, new DeviceFingerprintService(), new DeviceCredentialVerifier()),
-            'administrator_student_audit' => new AdministratorStudentAuditController($administratorStudentAudit, $administratorAuditLogs, $deviceConsistency, $studentLoginEvents, $tokens, $settings, $guard),
+            'student_devices' => new StudentDeviceController($deviceConsistency, $settings, $tokens, $guard, $fingerprints, new DeviceCredentialVerifier()),
+            'administrator_student_audit' => new AdministratorStudentAuditController($administratorStudentAudit, $administratorAuditLogs, $deviceConsistency, $studentLoginEvents, $tokens, $settings, $guard, $fingerprints),
             'administrator_data_cleanup' => new AdministratorDataCleanupController($administratorDataCleanup, $guard, $syllabus),
             'faculty_management' => new FacultyManagementController($users, $scopes, $facultyAdministration, $tokens, $settings, $guard, $syllabus),
             'academic' => new AcademicStructureController($academic, $guard),
