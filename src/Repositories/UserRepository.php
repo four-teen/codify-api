@@ -29,6 +29,23 @@ final class UserRepository
         return $row ? $this->cast($row) : null;
     }
 
+    public function findStudentByNumber(string $studentNumber): ?array
+    {
+        $statement = $this->db->prepare("SELECT student.* FROM users student
+            LEFT JOIN student_profiles profile ON profile.user_id = student.id
+            WHERE student.role = 'student'
+              AND (profile.student_number = :profile_number OR (profile.student_number IS NULL AND student.username = :legacy_username))
+            ORDER BY CASE WHEN profile.student_number = :preferred_number THEN 0 ELSE 1 END, student.id
+            LIMIT 1");
+        $statement->execute([
+            'profile_number' => $studentNumber,
+            'legacy_username' => $studentNumber,
+            'preferred_number' => $studentNumber,
+        ]);
+        $row = $statement->fetch();
+        return $row ? $this->cast($row) : null;
+    }
+
     public function findByEmail(string $email): ?array
     {
         $statement = $this->db->prepare('SELECT * FROM users WHERE email = :email LIMIT 1');
@@ -148,6 +165,11 @@ final class UserRepository
     public function updatePassword(int $id, string $hash): void
     {
         $this->db->prepare('UPDATE users SET password = :password, must_change_password = 0, updated_at = NOW() WHERE id = :id')->execute(['password' => $hash, 'id' => $id]);
+    }
+
+    public function setTemporaryPassword(int $id, string $hash): void
+    {
+        $this->db->prepare('UPDATE users SET password = :password, must_change_password = 1, updated_at = NOW() WHERE id = :id')->execute(['password' => $hash, 'id' => $id]);
     }
 
     public function rehashPassword(int $id, string $hash): void

@@ -52,6 +52,26 @@ final class StudentLearningController
         $this->syllabus->stream($syllabus);
     }
 
+    public function showAssessment(Request $request): void
+    {
+        $student = $this->student($request); $term = $this->term();
+        Response::success($this->learning->assessment(
+            (int) $student['id'], $this->subjectId($request), $this->assessmentId($request),
+            $term['academic_year'], $term['academic_term']
+        ));
+    }
+
+    public function submitAssessment(Request $request): void
+    {
+        $student = $this->student($request); $term = $this->term(); $input = $request->json();
+        $answers = $input['answers'] ?? null;
+        if (!is_array($answers)) throw new HttpException(422, 'Assessment answers must be supplied as a list.');
+        Response::success($this->learning->submitAssessment(
+            (int) $student['id'], $this->subjectId($request), $this->assessmentId($request),
+            $term['academic_year'], $term['academic_term'], $answers
+        ), 'Assessment submitted successfully.', 201);
+    }
+
     public function problems(Request $request): void
     {
         $student = $this->student($request); $term = $this->term();
@@ -109,6 +129,12 @@ final class StudentLearningController
     {
         $id = filter_var($request->route('problem'), FILTER_VALIDATE_INT);
         if ($id === false || $id < 1) throw new HttpException(404, 'Python problem not found.');
+        return (int) $id;
+    }
+    private function assessmentId(Request $request): int
+    {
+        $id = filter_var($request->route('assessment'), FILTER_VALIDATE_INT);
+        if ($id === false || $id < 1) throw new HttpException(404, 'Assessment not found.');
         return (int) $id;
     }
 }

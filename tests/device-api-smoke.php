@@ -35,6 +35,9 @@ try {
     if (!is_array($declined) || empty($declined['success']) || empty($declined['data']['signed_out'])) throw new RuntimeException('Device notice decline endpoint smoke test failed.');
     $signedOut = $request('GET', $base . '/auth/me', $token);
     if (!is_array($signedOut) || !empty($signedOut['success'])) throw new RuntimeException('Declined device notice did not revoke the student session.');
+    $nextToken = (new TokenRepository($db))->issue($studentId, 15);
+    $nextOverview = $request('GET', $base . '/student/device-consistency', $nextToken);
+    if (!is_array($nextOverview) || empty($nextOverview['success']) || ($nextOverview['data']['status'] ?? '') !== 'consent_required') throw new RuntimeException('Declined device notice was not required again on the next login. Status: ' . (string) ($nextOverview['data']['status'] ?? 'missing'));
     echo 'Device API smoke test passed.' . PHP_EOL;
 } finally {
     if ($studentId > 0) $db->prepare('DELETE FROM users WHERE id = :id')->execute(['id' => $studentId]);

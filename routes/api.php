@@ -23,6 +23,8 @@ return static function ($router, array $controllers): void {
 
     $router->get($prefix . '/system-settings', [$controllers['settings'], 'show']);
     $router->patch($prefix . '/system-settings', [$controllers['settings'], 'update']);
+    $router->get($prefix . '/admin/data-cleanup', [$controllers['administrator_data_cleanup'], 'show']);
+    $router->post($prefix . '/admin/data-cleanup', [$controllers['administrator_data_cleanup'], 'clear']);
 
     $router->get($prefix . '/users', [$controllers['users'], 'index']);
     $router->post($prefix . '/users', [$controllers['users'], 'store']);
@@ -32,6 +34,10 @@ return static function ($router, array $controllers): void {
 
     $router->get($prefix . '/admin/faculty', [$controllers['faculty_management'], 'index']);
     $router->post($prefix . '/admin/faculty', [$controllers['faculty_management'], 'store']);
+    $router->get($prefix . '/admin/faculty/{faculty}/dashboard', [$controllers['faculty_management'], 'dashboard']);
+    $router->delete($prefix . '/admin/faculty/{faculty}/students', [$controllers['faculty_management'], 'destroyStudents']);
+    $router->delete($prefix . '/admin/faculty/{faculty}/subjects', [$controllers['faculty_management'], 'destroySubjects']);
+    $router->delete($prefix . '/admin/faculty/{faculty}/subjects/{offering}', [$controllers['faculty_management'], 'destroySubject']);
     $router->get($prefix . '/admin/faculty/{faculty}', [$controllers['faculty_management'], 'show']);
     $router->patch($prefix . '/admin/faculty/{faculty}', [$controllers['faculty_management'], 'update']);
     $router->delete($prefix . '/admin/faculty/{faculty}', [$controllers['faculty_management'], 'destroy']);
@@ -51,6 +57,8 @@ return static function ($router, array $controllers): void {
     $router->delete($prefix . '/faculty/problem-bank/{problem}', [$controllers['problem_bank'], 'destroy']);
     $router->get($prefix . '/faculty/assessment-bank', [$controllers['assessment_bank'], 'index']);
     $router->post($prefix . '/faculty/assessment-bank', [$controllers['assessment_bank'], 'store']);
+    $router->get($prefix . '/faculty/assessment-bank/{bank}/responses', [$controllers['assessment_bank'], 'responses']);
+    $router->post($prefix . '/faculty/assessment-bank/{bank}/retakes', [$controllers['assessment_bank'], 'grantRetakes']);
     $router->get($prefix . '/faculty/assessment-bank/{bank}', [$controllers['assessment_bank'], 'show']);
     $router->patch($prefix . '/faculty/assessment-bank/{bank}', [$controllers['assessment_bank'], 'update']);
     $router->delete($prefix . '/faculty/assessment-bank/{bank}', [$controllers['assessment_bank'], 'destroy']);
@@ -59,6 +67,8 @@ return static function ($router, array $controllers): void {
     $router->get($prefix . '/student/subjects', [$controllers['student_learning'], 'subjects']);
     $router->get($prefix . '/student/subjects/{subject}', [$controllers['student_learning'], 'showSubject']);
     $router->get($prefix . '/student/subjects/{subject}/syllabus', [$controllers['student_learning'], 'showSyllabus']);
+    $router->get($prefix . '/student/subjects/{subject}/assessments/{assessment}', [$controllers['student_learning'], 'showAssessment']);
+    $router->post($prefix . '/student/subjects/{subject}/assessments/{assessment}/submit', [$controllers['student_learning'], 'submitAssessment']);
     $router->get($prefix . '/student/problems', [$controllers['student_learning'], 'problems']);
     $router->get($prefix . '/student/problems/{problem}', [$controllers['student_learning'], 'showProblem']);
     $router->post($prefix . '/student/problems/{problem}/run', [$controllers['student_learning'], 'runProblem']);
@@ -79,6 +89,11 @@ return static function ($router, array $controllers): void {
     $router->delete($prefix . '/faculty/subject-offerings/{offering}/syllabus', [$controllers['faculty_teaching'], 'destroySyllabus']);
     $router->post($prefix . '/faculty/subject-offerings/{offering}/students/import', [$controllers['faculty_teaching'], 'importStudents']);
     $router->post($prefix . '/faculty/subject-offerings/{offering}/students', [$controllers['faculty_teaching'], 'storeStudent']);
+    $router->get($prefix . '/faculty/subject-offerings/{offering}/students/{student}/monitoring', [$controllers['faculty_teaching'], 'studentMonitoring']);
+    $router->get($prefix . '/faculty/subject-offerings/{offering}/students/{student}/assessment-retakes', [$controllers['faculty_teaching'], 'studentAssessmentRetakes']);
+    $router->post($prefix . '/faculty/subject-offerings/{offering}/students/{student}/assessment-retakes/{assessment}', [$controllers['faculty_teaching'], 'grantStudentAssessmentRetake']);
+    $router->post($prefix . '/faculty/subject-offerings/{offering}/students/{student}/password-reset', [$controllers['faculty_teaching'], 'resetStudentPassword']);
+    $router->delete($prefix . '/faculty/subject-offerings/{offering}/students', [$controllers['faculty_teaching'], 'destroyStudents']);
     $router->delete($prefix . '/faculty/subject-offerings/{offering}/students/{student}', [$controllers['faculty_teaching'], 'destroyStudent']);
     $router->get($prefix . '/faculty/subject-offerings/{offering}', [$controllers['faculty_teaching'], 'show']);
     $router->delete($prefix . '/faculty/subject-offerings/{offering}', [$controllers['faculty_teaching'], 'destroy']);

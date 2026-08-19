@@ -45,6 +45,12 @@ When acknowledgment is required, student workspace endpoints remain locked until
 
 Useful validation commands are `php tests/unit-smoke.php`, `php tests/device-repository-smoke.php`, and `php tests/device-api-smoke.php`.
 
+## Quiz attempts and faculty retakes
+
+Existing installations should import `database/student-assessment-attempts.sql` once. Quizzes allow one student submission by default. A faculty instructor can grant one additional submission at a time to an individual student from the subject roster; the API enforces the limit even when requests are sent outside the browser interface.
+
+Run `php tests/quiz-retake-smoke.php` to validate quiz locking and faculty retake eligibility against an existing submitted quiz when one is available.
+
 ## Administrator student audit
 
 Existing installations that already imported the device-consistency migration should also import `database/administrator-student-audit.sql` once. New installations receive the table through either full schema.
@@ -52,3 +58,9 @@ Existing installations that already imported the device-consistency migration sh
 Administrator-only endpoints under `/api/v1/admin/student-audit` provide the complete student directory, last-name/email/student-ID/database-ID search, per-student fingerprint and login-event dashboards, session revocation, recorded-login cleanup, individual device removal, and full fingerprint reset. Cleanup operations are recorded in a separate administrator audit trail that is not erased with device data.
 
 Run `php tests/administrator-student-audit-api-smoke.php` to validate the directory, authorization, searches, dashboard, login cleanup, and fingerprint reset against temporary accounts.
+
+## Administrator faculty cleanup
+
+Administrator-only endpoints under `/api/v1/admin/faculty/{faculty}` expose a faculty dashboard with subjects, owned students, aggregate records, and paginated recorded activity. Administrators can delete all owned student accounts, all faculty subject offerings, one subject offering, or the faculty account with all related data.
+
+Subject deletion cascades rosters, syllabi, and subject links. Coding problems and assessment banks used only by the deleted subject are removed with their tests or questions; content shared with another subject is preserved. Student accounts are deleted only by the explicit all-students or full-faculty operations.

@@ -5,6 +5,7 @@ namespace Codify;
 
 use Codify\Controllers\AuthController;
 use Codify\Controllers\AdministratorStudentAuditController;
+use Codify\Controllers\AdministratorDataCleanupController;
 use Codify\Controllers\AcademicStructureController;
 use Codify\Controllers\AssessmentBankController;
 use Codify\Controllers\FacultySubjectController;
@@ -21,12 +22,14 @@ use Codify\Core\Request;
 use Codify\Core\Router;
 use Codify\Repositories\SystemSettingRepository;
 use Codify\Repositories\AdministratorAuditLogRepository;
+use Codify\Repositories\AdministratorDataCleanupRepository;
 use Codify\Repositories\AdministratorStudentAuditRepository;
 use Codify\Repositories\StudentLearningRepository;
 use Codify\Repositories\DeviceConsistencyRepository;
 use Codify\Repositories\AcademicStructureRepository;
 use Codify\Repositories\AssessmentBankRepository;
 use Codify\Repositories\FacultyScopeRepository;
+use Codify\Repositories\FacultyAdministrationRepository;
 use Codify\Repositories\FacultyTeachingRepository;
 use Codify\Repositories\ProblemBankRepository;
 use Codify\Repositories\TokenRepository;
@@ -57,11 +60,13 @@ final class Application
         $academic = new AcademicStructureRepository($this->db);
         $assessmentBanks = new AssessmentBankRepository($this->db);
         $scopes = new FacultyScopeRepository($this->db);
+        $facultyAdministration = new FacultyAdministrationRepository($this->db);
         $teaching = new FacultyTeachingRepository($this->db);
         $problems = new ProblemBankRepository($this->db);
         $studentLearning = new StudentLearningRepository($this->db);
         $administratorStudentAudit = new AdministratorStudentAuditRepository($this->db);
         $administratorAuditLogs = new AdministratorAuditLogRepository($this->db);
+        $administratorDataCleanup = new AdministratorDataCleanupRepository($this->db);
         $runnerConfig = require dirname(__DIR__) . '/config/runner.php';
         $runner = new Judge0RunnerService($runnerConfig);
         $syllabus = new SyllabusStorageService(require dirname(__DIR__) . '/config/syllabus.php');
@@ -75,12 +80,13 @@ final class Application
             'students' => new FacultyStudentController($users, $scopes, $tokens, $settings, $guard),
             'faculty_subjects' => new FacultySubjectController($scopes, $guard),
             'assessment_bank' => new AssessmentBankController($assessmentBanks, $settings, $guard),
-            'faculty_teaching' => new FacultyTeachingController($teaching, $users, $settings, $guard, $syllabus),
+            'faculty_teaching' => new FacultyTeachingController($teaching, $users, $tokens, $settings, $guard, $syllabus),
             'problem_bank' => new ProblemBankController($problems, $settings, $guard),
             'student_learning' => new StudentLearningController($studentLearning, $settings, $guard, $executionLimiter, $runner, (int) $runnerConfig['rate_limit_per_minute'], $syllabus),
             'student_devices' => new StudentDeviceController($deviceConsistency, $settings, $tokens, $guard, new DeviceFingerprintService(), new DeviceCredentialVerifier()),
             'administrator_student_audit' => new AdministratorStudentAuditController($administratorStudentAudit, $administratorAuditLogs, $deviceConsistency, $tokens, $settings, $guard),
-            'faculty_management' => new FacultyManagementController($users, $scopes, $tokens, $settings, $guard),
+            'administrator_data_cleanup' => new AdministratorDataCleanupController($administratorDataCleanup, $guard, $syllabus),
+            'faculty_management' => new FacultyManagementController($users, $scopes, $facultyAdministration, $tokens, $settings, $guard, $syllabus),
             'academic' => new AcademicStructureController($academic, $guard),
         ];
         $users->ensureInitialAdministrator();

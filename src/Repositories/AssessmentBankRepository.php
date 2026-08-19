@@ -45,6 +45,8 @@ final class AssessmentBankRepository
         $sql = "SELECT bank.*,
             (SELECT COUNT(*) FROM assessment_bank_questions question WHERE question.assessment_bank_id = bank.id) AS questions_count,
             (SELECT COALESCE(SUM(question.points), 0) FROM assessment_bank_questions question WHERE question.assessment_bank_id = bank.id) AS total_points,
+            (SELECT COUNT(DISTINCT attempt.faculty_subject_id, attempt.student_id) FROM student_assessment_attempts attempt WHERE attempt.assessment_bank_id = bank.id) AS respondents_count,
+            (SELECT COUNT(*) FROM student_assessment_attempts attempt WHERE attempt.assessment_bank_id = bank.id) AS submissions_count,
             (SELECT GROUP_CONCAT(CONCAT(s.code, IF(fs.section = '', '', CONCAT(' / ', fs.section))) ORDER BY s.code, fs.section SEPARATOR ', ')
                 FROM assessment_bank_subjects abs
                 INNER JOIN faculty_subjects fs ON fs.id = abs.faculty_subject_id
@@ -80,6 +82,107 @@ final class AssessmentBankRepository
         $bank['faculty_subject_ids'] = array_map(static function (array $subject): int { return (int) $subject['id']; }, $bank['subjects']);
         $bank['questions'] = $this->questions($bankId);
         return $bank;
+    }
+
+    public function responses(int $facultyId, int $bankId): array
+    {
+        $bank = $this->bank($facultyId, $bankId);
+        $statement = $this->db->prepare("SELECT latest.id AS attempt_id, latest.auto_score, latest.total_points,
+            latest.pending_review_points, latest.grading_status, latest.submitted_at, grouped.attempts_count,
+            grouped.average_score, grouped.average_total_points, grouped.final_score_percent,
+            COALESCE(permission.additional_attempts, 0) AS additional_attempts,
+            student.id AS student_id, student.name AS student_name, student.username,
+            profile.student_number, fs.id AS faculty_subject_id, fs.section,
+            subject.code AS subject_code, subject.name AS subject_name, program.code AS program_code
+            FROM (
+                SELECT faculty_subject_id, student_id, COUNT(*) AS attempts_count, MAX(id) AS latest_attempt_id,
+                    AVG(auto_score) AS average_score, AVG(total_points) AS average_total_points,
+                    AVG(CASE WHEN total_points > 0 THEN (auto_score / total_points) * 100 ELSE 0 END) AS final_score_percent
+                FROM student_assessment_attempts
+                WHERE assessment_bank_id = :group_bank
+                GROUP BY faculty_subject_id, student_id
+            ) grouped
+            INNER JOIN student_assessment_attempts latest ON latest.id = grouped.latest_attempt_id
+            INNER JOIN users student ON student.id = grouped.student_id AND student.role = 'student'
+            LEFT JOIN student_profiles profile ON profile.user_id = student.id
+            INNER JOIN faculty_subjects fs ON fs.id = grouped.faculty_subject_id AND fs.faculty_id = :faculty
+            INNER JOIN subjects subject ON subject.id = fs.subject_id
+            INNER JOIN programs program ON program.id = subject.program_id
+            LEFT JOIN student_assessment_retake_permissions permission ON permission.assessment_bank_id = :permission_bank
+                AND permission.faculty_subject_id = grouped.faculty_subject_id AND permission.student_id = grouped.student_id
+            ORDER BY student.last_name, student.first_name, student.name, subject.code, fs.section");
+        $statement->execute(['group_bank' => $bankId, 'faculty' => $facultyId, 'permission_bank' => $bankId]);
+        $rows = []; $submissions = 0; $pending = 0; $percentTotal = 0.0;
+        foreach ($statement->fetchAll() as $row) {
+            $totalPoints = (int) $row['total_points']; $autoScore = (int) $row['auto_score'];
+            $percent = $totalPoints > 0 ? (int) round(($autoScore / $totalPoints) * 100) : 0;
+            $attempts = (int) $row['attempts_count'];
+            $additional = (int) $row['additional_attempts'];
+            $remaining = max(0, $additional - max(0, $attempts - 1));
+            $finalPercent = round((float) $row['final_score_percent'], 1);
+            $submissions += $attempts; $percentTotal += $finalPercent;
+            if ($row['grading_status'] === 'pending_review') $pending++;
+            $rows[] = [
+                'attempt_id' => (int) $row['attempt_id'], 'student_id' => (int) $row['student_id'],
+                'student_name' => $row['student_name'], 'student_number' => $row['student_number'] ?: $row['username'],
+                'faculty_subject_id' => (int) $row['faculty_subject_id'], 'program_code' => $row['program_code'],
+                'subject_code' => $row['subject_code'], 'subject_name' => $row['subject_name'], 'section' => $row['section'],
+                'attempts_count' => $attempts, 'auto_score' => $autoScore, 'total_points' => $totalPoints,
+                'score_percent' => $percent, 'pending_review_points' => (int) $row['pending_review_points'],
+                'average_score' => round((float) $row['average_score'], 2),
+                'average_total_points' => round((float) $row['average_total_points'], 2),
+                'final_score_percent' => $finalPercent,
+                'retakes_remaining' => $remaining,
+                'can_grant_retake' => $attempts > 0 && $remaining === 0,
+                'grading_status' => $row['grading_status'], 'submitted_at' => $row['submitted_at'],
+            ];
+        }
+        $respondents = count($rows);
+        return [
+            'bank' => ['id' => $bank['id'], 'code' => $bank['code'], 'title' => $bank['title'], 'bank_type' => $bank['bank_type']],
+            'summary' => [
+                'respondents' => $respondents, 'submissions' => $submissions, 'pending_review' => $pending,
+                'average_percent' => $respondents > 0 ? (int) round($percentTotal / $respondents) : 0,
+            ],
+            'students' => $rows,
+        ];
+    }
+
+    public function grantRetakes(int $facultyId, int $bankId, array $students): array
+    {
+        $bank = $this->bank($facultyId, $bankId);
+        return $this->transaction(function () use ($facultyId, $bankId, $bank, $students): array {
+            $eligible = $this->db->prepare("SELECT bank.id FROM faculty_subject_students enrollment
+                INNER JOIN faculty_subjects fs ON fs.id = enrollment.faculty_subject_id
+                INNER JOIN assessment_bank_subjects link ON link.faculty_subject_id = fs.id
+                INNER JOIN assessment_banks bank ON bank.id = link.assessment_bank_id AND bank.faculty_id = fs.faculty_id
+                WHERE bank.id = :bank AND bank.faculty_id = :faculty AND bank.is_active = 1
+                    AND fs.id = :offering AND fs.is_active = 1 AND enrollment.student_id = :student
+                LIMIT 1 FOR UPDATE");
+            $count = $this->db->prepare('SELECT COUNT(*) FROM student_assessment_attempts WHERE assessment_bank_id = :bank AND faculty_subject_id = :offering AND student_id = :student');
+            $permission = $this->db->prepare('SELECT additional_attempts FROM student_assessment_retake_permissions WHERE assessment_bank_id = :bank AND faculty_subject_id = :offering AND student_id = :student FOR UPDATE');
+            $grant = $this->db->prepare('INSERT INTO student_assessment_retake_permissions
+                (assessment_bank_id, faculty_subject_id, student_id, additional_attempts, granted_by, granted_at, updated_at)
+                VALUES (:bank, :offering, :student, :additional_attempts, :faculty, NOW(), NOW())
+                ON DUPLICATE KEY UPDATE additional_attempts = VALUES(additional_attempts), granted_by = VALUES(granted_by), granted_at = NOW(), updated_at = NOW()');
+            $granted = 0; $alreadyAllowed = 0;
+            foreach ($students as $selection) {
+                $parameters = ['bank' => $bankId, 'faculty' => $facultyId, 'offering' => $selection['faculty_subject_id'], 'student' => $selection['student_id']];
+                $eligible->execute($parameters);
+                if (!$eligible->fetchColumn()) throw new HttpException(422, 'One or more selected students are not eligible for this assessment.');
+                $attemptParameters = ['bank' => $bankId, 'offering' => $selection['faculty_subject_id'], 'student' => $selection['student_id']];
+                $count->execute($attemptParameters); $attempts = (int) $count->fetchColumn();
+                if ($attempts < 1) throw new HttpException(422, 'One or more selected students have not submitted this assessment yet.');
+                $permission->execute($attemptParameters); $additional = (int) ($permission->fetchColumn() ?: 0);
+                if ($additional - max(0, $attempts - 1) > 0) { $alreadyAllowed++; continue; }
+                $grant->execute($attemptParameters + ['additional_attempts' => $attempts, 'faculty' => $facultyId]);
+                $granted++;
+            }
+            return [
+                'bank' => ['id' => $bank['id'], 'code' => $bank['code'], 'title' => $bank['title'], 'bank_type' => $bank['bank_type']],
+                'selected' => count($students), 'granted' => $granted, 'already_allowed' => $alreadyAllowed,
+            ];
+        });
     }
 
     public function create(int $facultyId, array $data, array $subjectIds, array $questions, string $academicYear, string $academicTerm): array
@@ -189,7 +292,7 @@ final class AssessmentBankRepository
 
     private function bankListPayload(array $row): array
     {
-        return ['id' => (int) $row['id'], 'code' => $row['code'], 'title' => $row['title'], 'bank_type' => $row['bank_type'], 'description' => $row['description'], 'is_active' => (bool) $row['is_active'], 'questions_count' => (int) ($row['questions_count'] ?? 0), 'total_points' => (int) ($row['total_points'] ?? 0), 'subject_labels' => $row['subject_labels'] ?? '', 'created_at' => $row['created_at'], 'updated_at' => $row['updated_at']];
+        return ['id' => (int) $row['id'], 'code' => $row['code'], 'title' => $row['title'], 'bank_type' => $row['bank_type'], 'description' => $row['description'], 'is_active' => (bool) $row['is_active'], 'questions_count' => (int) ($row['questions_count'] ?? 0), 'total_points' => (int) ($row['total_points'] ?? 0), 'respondents_count' => (int) ($row['respondents_count'] ?? 0), 'submissions_count' => (int) ($row['submissions_count'] ?? 0), 'subject_labels' => $row['subject_labels'] ?? '', 'created_at' => $row['created_at'], 'updated_at' => $row['updated_at']];
     }
 
     private function bankPayload(array $row): array

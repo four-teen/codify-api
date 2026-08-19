@@ -8,6 +8,7 @@ use Codify\Core\Request;
 use Codify\Core\Response;
 use Codify\Repositories\FacultyTeachingRepository;
 use Codify\Repositories\SystemSettingRepository;
+use Codify\Repositories\TokenRepository;
 use Codify\Repositories\UserRepository;
 use Codify\Services\AuthGuard;
 use Codify\Support\Validator;
@@ -17,12 +18,13 @@ final class FacultyTeachingController
 {
     private $teaching;
     private $users;
+    private $tokens;
     private $settings;
     private $guard;
     private $syllabus;
 
-    public function __construct(FacultyTeachingRepository $teaching, UserRepository $users, SystemSettingRepository $settings, AuthGuard $guard, SyllabusStorageService $syllabus)
-    { $this->teaching = $teaching; $this->users = $users; $this->settings = $settings; $this->guard = $guard; $this->syllabus = $syllabus; }
+    public function __construct(FacultyTeachingRepository $teaching, UserRepository $users, TokenRepository $tokens, SystemSettingRepository $settings, AuthGuard $guard, SyllabusStorageService $syllabus)
+    { $this->teaching = $teaching; $this->users = $users; $this->tokens = $tokens; $this->settings = $settings; $this->guard = $guard; $this->syllabus = $syllabus; }
 
     public function index(Request $request): void
     {
@@ -74,7 +76,7 @@ final class FacultyTeachingController
     {
         $faculty = $this->faculty($request); $offeringId = $this->offeringId($request); $syllabus = $this->teaching->syllabus((int) $faculty['id'], $offeringId);
         $this->teaching->deleteOffering((int) $faculty['id'], $offeringId); if ($syllabus !== null) $this->syllabus->delete($syllabus['stored_name']);
-        Response::success([], 'Faculty subject removed.');
+        Response::success([], 'Faculty subject and all subject-related records removed. Student accounts remain available.');
     }
 
     public function storeStudent(Request $request): void
@@ -103,11 +105,12 @@ final class FacultyTeachingController
                     'row_number' => $rowNumber, 'name' => $result['student']['name'],
                     'status' => $result['created'] ? 'created' : ($result['enrolled'] ? 'enrolled' : 'already_enrolled'),
                     'username' => $result['student']['username'], 'email' => $result['student']['email'],
-                    'temporary_password' => $result['credentials']['temporary_password'] ?? null, 'error' => null,
+                    'temporary_password' => $result['credentials']['temporary_password'] ?? null,
+                    'warning' => $result['email_discrepancy'], 'error' => null,
                 ];
             } catch (HttpException $exception) {
                 $failed++;
-                $results[] = ['row_number' => $rowNumber, 'name' => is_array($row) ? (string) ($row['full_name'] ?? '') : '', 'status' => 'failed', 'username' => null, 'email' => null, 'temporary_password' => null, 'error' => $exception->getMessage()];
+                $results[] = ['row_number' => $rowNumber, 'name' => is_array($row) ? (string) ($row['full_name'] ?? '') : '', 'status' => 'failed', 'username' => null, 'email' => null, 'temporary_password' => null, 'warning' => null, 'error' => $exception->getMessage()];
             }
         }
         Response::success(['summary' => ['total' => count($rows), 'created' => $created, 'enrolled' => $enrolled, 'already_enrolled' => $existing, 'failed' => $failed], 'rows' => $results], 'Class list import completed.');
@@ -119,20 +122,88 @@ final class FacultyTeachingController
         Response::success([], 'Student removed from this subject. The account remains available for other subjects.');
     }
 
+    public function studentMonitoring(Request $request): void
+    {
+        $faculty = $this->faculty($request);
+        Response::success($this->teaching->studentMonitoring(
+            (int) $faculty['id'],
+            $this->offeringId($request),
+            $this->studentId($request)
+        ));
+    }
+
+    public function studentAssessmentRetakes(Request $request): void
+    {
+        $faculty = $this->faculty($request);
+        Response::success($this->teaching->studentAssessmentRetakes(
+            (int) $faculty['id'],
+            $this->offeringId($request),
+            $this->studentId($request)
+        ));
+    }
+
+    public function grantStudentAssessmentRetake(Request $request): void
+    {
+        $faculty = $this->faculty($request);
+        Response::success($this->teaching->grantStudentAssessmentRetake(
+            (int) $faculty['id'],
+            $this->offeringId($request),
+            $this->studentId($request),
+            $this->assessmentId($request)
+        ), 'One assessment retake allowed for this student.');
+    }
+
+    public function resetStudentPassword(Request $request): void
+    {
+        $faculty = $this->faculty($request);
+        $offeringId = $this->offeringId($request);
+        $studentId = $this->studentId($request);
+        $student = $this->teaching->student((int) $faculty['id'], $offeringId, $studentId);
+        $temporaryPassword = $this->temporaryPassword();
+        $this->teaching->transaction(function () use ($studentId, $temporaryPassword): void {
+            $this->users->setTemporaryPassword($studentId, $this->hash($temporaryPassword));
+            $this->tokens->revokeAll($studentId);
+        });
+        Response::success([
+            'credentials' => [
+                'username' => $student['username'],
+                'email' => $student['email'],
+                'temporary_password' => $temporaryPassword,
+            ],
+        ], 'Student password reset. Existing sessions were revoked.');
+    }
+
+    public function destroyStudents(Request $request): void
+    {
+        $faculty = $this->faculty($request);
+        $removed = $this->teaching->unenrollAll((int) $faculty['id'], $this->offeringId($request));
+        $label = $removed === 1 ? 'student' : 'students';
+        Response::success(['removed_count' => $removed], $removed . ' ' . $label . ' removed from this subject. Their accounts remain available for other subjects.');
+    }
+
     private function saveStudent(int $facultyId, int $offeringId, array $input, string $source): array
     {
         $offering = $this->teaching->offering($facultyId, $offeringId); $data = $this->studentData($input);
         return $this->teaching->transaction(function () use ($facultyId, $offeringId, $offering, $data, $source) {
-            $existing = $this->users->findByUsername($data['student_number']);
-            $created = false; $temporaryPassword = null;
+            $existing = $this->users->findStudentByNumber($data['student_number']);
+            $created = false; $temporaryPassword = null; $emailDiscrepancy = null;
             if ($existing) {
-                if ($existing['role'] !== 'student' || (int) $existing['faculty_id'] !== $facultyId) throw new HttpException(422, 'The student number is already assigned to another account.');
+                if ((int) $existing['faculty_id'] !== $facultyId) throw new HttpException(422, 'This student number belongs to an account managed by another faculty member. Ask an administrator to review the account assignment.');
                 $profile = $this->teaching->studentProfile((int) $existing['id']);
                 if ($profile && (int) $profile['program_id'] !== (int) $offering['program_id']) throw new HttpException(422, 'This student already belongs to a different program.');
+                if ($data['email'] !== null && strcasecmp((string) $existing['email'], $data['email']) !== 0) {
+                    $emailDiscrepancy = 'The class-list email differs from the existing account. The registered email was kept unchanged.';
+                }
                 $student = $existing;
             } else {
-                $local = $this->uniqueEmailLocal($this->credentialLocal($data['first_name'], $data['last_name']));
-                $email = $local . '@sksu.edu.ph'; $temporaryPassword = $local . '@1234';
+                $credentialLocal = $this->credentialLocal($data['first_name'], $data['last_name']);
+                if ($data['email'] !== null) {
+                    $email = $data['email'];
+                    $temporaryPassword = $credentialLocal . '@1234';
+                } else {
+                    $local = $this->uniqueEmailLocal($credentialLocal);
+                    $email = $local . '@sksu.edu.ph'; $temporaryPassword = $local . '@1234';
+                }
                 $this->users->assertUnique($data['student_number'], $email, null);
                 $student = $this->users->create([
                     'faculty_id' => $facultyId, 'first_name' => $data['first_name'], 'last_name' => $data['last_name'],
@@ -147,6 +218,7 @@ final class FacultyTeachingController
             return [
                 'created' => $created, 'enrolled' => $enrolled, 'student' => $this->teaching->student($facultyId, $offeringId, (int) $student['id']),
                 'credentials' => $created ? ['username' => $student['username'], 'email' => $student['email'], 'temporary_password' => $temporaryPassword] : null,
+                'email_discrepancy' => $emailDiscrepancy,
             ];
         });
     }
@@ -161,13 +233,19 @@ final class FacultyTeachingController
         if (!isset($input['mobile_number']) && isset($input['mobilenumber'])) $input['mobile_number'] = $input['mobilenumber'];
         if (!isset($input['course_label']) && isset($input['course'])) $input['course_label'] = $input['course'];
         if (!isset($input['enrollment_status']) && isset($input['status'])) $input['enrollment_status'] = $input['status'];
+        if (!isset($input['email']) && isset($input['source_email'])) $input['email'] = $input['source_email'];
         $v = new Validator($input); $firstName = $v->requiredString('first_name', 100); $lastName = $v->requiredString('last_name', 100);
         $studentNumber = preg_replace('/\s+/', '', $v->requiredString('student_number', 50));
         $gender = $v->optionalString('gender', 30); $mobile = $v->optionalString('mobile_number', 30);
         $course = $v->optionalString('course_label', 255); $status = $v->optionalString('enrollment_status', 100);
+        $email = $v->optionalString('email', 255);
+        if ($email !== null) {
+            $email = strtolower($email);
+            if (filter_var($email, FILTER_VALIDATE_EMAIL) === false) $v->add('email', 'The class-list email must be a valid email address.');
+        }
         $active = $v->boolean('is_active', true); $v->throwIfFailed();
         if ($studentNumber === '' || preg_match('/^[A-Za-z0-9._-]+$/', $studentNumber) !== 1) throw new HttpException(422, 'The student Code must contain only letters, numbers, dots, underscores, or hyphens.');
-        return ['first_name' => $firstName, 'last_name' => $lastName, 'student_number' => $studentNumber, 'gender' => $gender, 'mobile_number' => $mobile, 'course_label' => $course, 'enrollment_status' => $status, 'is_active' => $active];
+        return ['first_name' => $firstName, 'last_name' => $lastName, 'student_number' => $studentNumber, 'email' => $email, 'gender' => $gender, 'mobile_number' => $mobile, 'course_label' => $course, 'enrollment_status' => $status, 'is_active' => $active];
     }
 
     private function splitFullName(string $fullName): array
@@ -203,7 +281,15 @@ final class FacultyTeachingController
     private function faculty(Request $request): array { return $this->guard->authenticate($request, true, 'faculty', true); }
     private function offeringId(Request $request): int { return $this->routeId($request, 'offering', 'Faculty subject not found.'); }
     private function studentId(Request $request): int { return $this->routeId($request, 'student', 'Student not found.'); }
+    private function assessmentId(Request $request): int { return $this->routeId($request, 'assessment', 'Quiz not found.'); }
     private function routeId(Request $request, string $key, string $message): int { $id = filter_var($request->route($key), FILTER_VALIDATE_INT); if ($id === false || $id < 1) throw new HttpException(404, $message); return (int) $id; }
     private function upper(string $value): string { return function_exists('mb_strtoupper') ? mb_strtoupper(trim($value), 'UTF-8') : strtoupper(trim($value)); }
     private function hash(string $password): string { return password_hash($password, PASSWORD_BCRYPT, ['cost' => max(10, min(14, (int) env('BCRYPT_ROUNDS', '12')))]); }
+    private function temporaryPassword(): string
+    {
+        $alphabet = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789';
+        $password = 'Cd9!';
+        for ($index = 0; $index < 10; $index++) $password .= $alphabet[random_int(0, strlen($alphabet) - 1)];
+        return $password;
+    }
 }
