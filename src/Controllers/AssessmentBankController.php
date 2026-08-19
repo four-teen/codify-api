@@ -34,6 +34,17 @@ final class AssessmentBankController
     public function show(Request $request): void
     { $faculty = $this->faculty($request); Response::success($this->banks->bank((int) $faculty['id'], $this->bankId($request))); }
 
+    public function responses(Request $request): void
+    { $faculty = $this->faculty($request); Response::success($this->banks->responses((int) $faculty['id'], $this->bankId($request))); }
+
+    public function grantRetakes(Request $request): void
+    {
+        $faculty = $this->faculty($request);
+        $students = $this->retakeStudents($request->json());
+        $result = $this->banks->grantRetakes((int) $faculty['id'], $this->bankId($request), $students);
+        Response::success($result, $result['granted'] === 1 ? 'One assessment retake allowed.' : $result['granted'] . ' assessment retakes allowed.');
+    }
+
     public function store(Request $request): void
     {
         $faculty = $this->faculty($request); $payload = $this->payload($request->json()); $settings = $this->settings->current();
@@ -59,6 +70,25 @@ final class AssessmentBankController
         if (!in_array($status, ['', 'active', 'draft'], true)) $status = '';
         $offering = filter_var($request->query('offering_id', 0), FILTER_VALIDATE_INT);
         return ['search' => trim((string) $request->query('search', '')), 'bank_type' => $type, 'status' => $status, 'offering_id' => $offering === false || $offering < 1 ? 0 : (int) $offering];
+    }
+
+    private function retakeStudents(array $input): array
+    {
+        $items = $input['students'] ?? null;
+        if (!is_array($items) || $items === []) throw new HttpException(422, 'Select at least one student to allow a retake.');
+        if (count($items) > 500) throw new HttpException(422, 'No more than 500 students can be selected at once.');
+        $students = [];
+        foreach ($items as $item) {
+            if (!is_array($item)) throw new HttpException(422, 'One or more selected students are invalid.');
+            $studentId = filter_var($item['student_id'] ?? null, FILTER_VALIDATE_INT);
+            $offeringId = filter_var($item['faculty_subject_id'] ?? null, FILTER_VALIDATE_INT);
+            if ($studentId === false || $studentId < 1 || $offeringId === false || $offeringId < 1) {
+                throw new HttpException(422, 'One or more selected students are invalid.');
+            }
+            $key = (int) $offeringId . ':' . (int) $studentId;
+            $students[$key] = ['student_id' => (int) $studentId, 'faculty_subject_id' => (int) $offeringId];
+        }
+        return array_values($students);
     }
 
     private function payload(array $input): array

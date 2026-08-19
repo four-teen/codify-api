@@ -69,9 +69,12 @@ final class FacultyTeachingRepository
 
     public function deleteOffering(int $facultyId, int $offeringId): void
     {
-        $offering = $this->offering($facultyId, $offeringId);
-        if ((int) $offering['students_count'] > 0) throw new HttpException(422, 'Remove the enrolled students before deleting this faculty subject.');
-        $this->db->prepare('DELETE FROM faculty_subjects WHERE id = :id AND faculty_id = :faculty')->execute(['id' => $offeringId, 'faculty' => $facultyId]);
+        $this->offering($facultyId, $offeringId);
+        $this->transaction(function () use ($facultyId, $offeringId) {
+            $this->db->prepare('DELETE problem FROM coding_problems problem INNER JOIN coding_problem_subjects link ON link.problem_id = problem.id WHERE problem.faculty_id = :faculty AND link.faculty_subject_id = :offering AND NOT EXISTS (SELECT 1 FROM coding_problem_subjects shared WHERE shared.problem_id = problem.id AND shared.faculty_subject_id <> :shared_offering)')->execute(['faculty' => $facultyId, 'offering' => $offeringId, 'shared_offering' => $offeringId]);
+            $this->db->prepare('DELETE bank FROM assessment_banks bank INNER JOIN assessment_bank_subjects link ON link.assessment_bank_id = bank.id WHERE bank.faculty_id = :faculty AND link.faculty_subject_id = :offering AND NOT EXISTS (SELECT 1 FROM assessment_bank_subjects shared WHERE shared.assessment_bank_id = bank.id AND shared.faculty_subject_id <> :shared_offering)')->execute(['faculty' => $facultyId, 'offering' => $offeringId, 'shared_offering' => $offeringId]);
+            $this->db->prepare('DELETE FROM faculty_subjects WHERE id = :id AND faculty_id = :faculty')->execute(['id' => $offeringId, 'faculty' => $facultyId]);
+        });
     }
 
     public function students(int $facultyId, int $offeringId): array
@@ -79,7 +82,9 @@ final class FacultyTeachingRepository
         $this->offering($facultyId, $offeringId);
         $statement = $this->db->prepare("SELECT u.id, u.faculty_id, u.first_name, u.last_name, u.name, u.username, u.email, u.is_active, u.must_change_password,
             sp.program_id, sp.student_number, sp.gender, sp.mobile_number, sp.course_label, sp.enrollment_status,
-            fss.source, fss.created_at AS enrolled_at
+            fss.source, fss.created_at AS enrolled_at,
+            (SELECT COUNT(*) FROM student_device_events login_event WHERE login_event.student_id = u.id AND login_event.event_type = 'session_start') AS login_count,
+            (SELECT MAX(login_event.occurred_at) FROM student_device_events login_event WHERE login_event.student_id = u.id AND login_event.event_type = 'session_start') AS latest_login_at
             FROM faculty_subject_students fss
             INNER JOIN faculty_subjects fs ON fs.id = fss.faculty_subject_id
             INNER JOIN users u ON u.id = fss.student_id
@@ -90,11 +95,78 @@ final class FacultyTeachingRepository
         return array_map([$this, 'studentPayload'], $statement->fetchAll());
     }
 
+    public function studentMonitoring(int $facultyId, int $offeringId, int $studentId): array
+    {
+        $student = $this->student($facultyId, $offeringId, $studentId);
+        $periodEnd = new \DateTimeImmutable('today');
+        $periodStart = $periodEnd->modify('-29 days');
+        $parameters = [
+            'student' => $studentId,
+            'period_start' => $periodStart->format('Y-m-d'),
+            'period_end' => $periodEnd->format('Y-m-d'),
+        ];
+
+        $statement = $this->db->prepare("SELECT DATE(event.occurred_at) AS activity_date,
+            COUNT(DISTINCT event.device_id) AS devices_used,
+            MAX(CASE WHEN event.device_id = (
+                SELECT original.id FROM student_devices original
+                WHERE original.student_id = :original_student
+                ORDER BY original.first_seen_at, original.id LIMIT 1
+            ) THEN 1 ELSE 0 END) AS original_device_used
+            FROM student_device_events event
+            WHERE event.student_id = :student AND event.event_type = 'session_start'
+                AND event.occurred_at >= :period_start
+                AND event.occurred_at < DATE_ADD(:period_end, INTERVAL 1 DAY)
+            GROUP BY DATE(event.occurred_at)
+            ORDER BY activity_date");
+        $statement->execute($parameters + ['original_student' => $studentId]);
+        $recordedDays = [];
+        foreach ($statement->fetchAll() as $row) {
+            $recordedDays[$row['activity_date']] = [
+                'devices_used' => (int) $row['devices_used'],
+                'original_device_used' => (bool) $row['original_device_used'],
+            ];
+        }
+
+        $days = [];
+        for ($date = $periodStart; $date <= $periodEnd; $date = $date->modify('+1 day')) {
+            $key = $date->format('Y-m-d');
+            $days[] = [
+                'date' => $key,
+                'devices_used' => $recordedDays[$key]['devices_used'] ?? 0,
+                'original_device_used' => $recordedDays[$key]['original_device_used'] ?? false,
+            ];
+        }
+
+        $summary = $this->db->prepare("SELECT COUNT(DISTINCT event.device_id) AS devices_used,
+            COUNT(DISTINCT DATE(event.occurred_at)) AS active_days
+            FROM student_device_events event
+            WHERE event.student_id = :student AND event.event_type = 'session_start'
+                AND event.occurred_at >= :period_start
+                AND event.occurred_at < DATE_ADD(:period_end, INTERVAL 1 DAY)");
+        $summary->execute($parameters);
+        $summaryRow = $summary->fetch() ?: ['devices_used' => 0, 'active_days' => 0];
+
+        return [
+            'student' => ['id' => $student['id'], 'name' => $student['name'], 'student_number' => $student['student_number']],
+            'period' => ['start' => $periodStart->format('Y-m-d'), 'end' => $periodEnd->format('Y-m-d'), 'days' => 30],
+            'summary' => [
+                'total_logins' => (int) $student['login_count'],
+                'devices_used' => (int) $summaryRow['devices_used'],
+                'active_days' => (int) $summaryRow['active_days'],
+                'latest_login_at' => $student['latest_login_at'],
+            ],
+            'days' => $days,
+        ];
+    }
+
     public function student(int $facultyId, int $offeringId, int $studentId): array
     {
         $statement = $this->db->prepare("SELECT u.id, u.faculty_id, u.first_name, u.last_name, u.name, u.username, u.email, u.is_active, u.must_change_password,
             sp.program_id, sp.student_number, sp.gender, sp.mobile_number, sp.course_label, sp.enrollment_status,
-            fss.source, fss.created_at AS enrolled_at
+            fss.source, fss.created_at AS enrolled_at,
+            (SELECT COUNT(*) FROM student_device_events login_event WHERE login_event.student_id = u.id AND login_event.event_type = 'session_start') AS login_count,
+            (SELECT MAX(login_event.occurred_at) FROM student_device_events login_event WHERE login_event.student_id = u.id AND login_event.event_type = 'session_start') AS latest_login_at
             FROM faculty_subject_students fss
             INNER JOIN faculty_subjects fs ON fs.id = fss.faculty_subject_id
             INNER JOIN users u ON u.id = fss.student_id
@@ -140,6 +212,91 @@ final class FacultyTeachingRepository
         $statement = $this->db->prepare('DELETE fss FROM faculty_subject_students fss INNER JOIN faculty_subjects fs ON fs.id = fss.faculty_subject_id WHERE fss.faculty_subject_id = :offering AND fss.student_id = :student AND fs.faculty_id = :faculty');
         $statement->execute(['offering' => $offeringId, 'student' => $studentId, 'faculty' => $facultyId]);
         if ($statement->rowCount() < 1) throw new HttpException(404, 'Student is not enrolled in this faculty subject.');
+    }
+
+    public function unenrollAll(int $facultyId, int $offeringId): int
+    {
+        $this->offering($facultyId, $offeringId);
+        $statement = $this->db->prepare('DELETE FROM faculty_subject_students WHERE faculty_subject_id = :offering');
+        $statement->execute(['offering' => $offeringId]);
+        return $statement->rowCount();
+    }
+
+    public function studentAssessmentRetakes(int $facultyId, int $offeringId, int $studentId): array
+    {
+        $this->student($facultyId, $offeringId, $studentId);
+        $statement = $this->db->prepare("SELECT bank.id, bank.code, bank.title, bank.bank_type,
+            (SELECT COUNT(*) FROM student_assessment_attempts attempt
+                WHERE attempt.assessment_bank_id = bank.id AND attempt.faculty_subject_id = :attempt_offering AND attempt.student_id = :attempt_student) AS attempts_count,
+            (SELECT attempt.auto_score FROM student_assessment_attempts attempt
+                WHERE attempt.assessment_bank_id = bank.id AND attempt.faculty_subject_id = :score_offering AND attempt.student_id = :score_student
+                ORDER BY attempt.id DESC LIMIT 1) AS latest_score,
+            (SELECT attempt.total_points FROM student_assessment_attempts attempt
+                WHERE attempt.assessment_bank_id = bank.id AND attempt.faculty_subject_id = :points_offering AND attempt.student_id = :points_student
+                ORDER BY attempt.id DESC LIMIT 1) AS latest_total_points,
+            COALESCE(permission.additional_attempts, 0) AS additional_attempts
+            FROM assessment_banks bank
+            INNER JOIN assessment_bank_subjects link ON link.assessment_bank_id = bank.id
+            INNER JOIN faculty_subjects fs ON fs.id = link.faculty_subject_id AND fs.faculty_id = bank.faculty_id
+            LEFT JOIN student_assessment_retake_permissions permission ON permission.assessment_bank_id = bank.id
+                AND permission.faculty_subject_id = fs.id AND permission.student_id = :permission_student
+            WHERE fs.id = :offering AND fs.faculty_id = :faculty AND fs.is_active = 1 AND bank.is_active = 1
+            ORDER BY bank.updated_at DESC, bank.code");
+        $statement->execute([
+            'attempt_offering' => $offeringId, 'attempt_student' => $studentId,
+            'score_offering' => $offeringId, 'score_student' => $studentId,
+            'points_offering' => $offeringId, 'points_student' => $studentId,
+            'permission_student' => $studentId, 'offering' => $offeringId, 'faculty' => $facultyId,
+        ]);
+        return array_map(static function (array $row): array {
+            $attempts = (int) $row['attempts_count'];
+            $additional = (int) $row['additional_attempts'];
+            $remaining = max(0, $additional - max(0, $attempts - 1));
+            return [
+                'id' => (int) $row['id'], 'code' => $row['code'], 'title' => $row['title'], 'bank_type' => $row['bank_type'],
+                'attempts_count' => $attempts,
+                'latest_score' => $row['latest_score'] === null ? null : (int) $row['latest_score'],
+                'latest_total_points' => $row['latest_total_points'] === null ? null : (int) $row['latest_total_points'],
+                'retakes_remaining' => $remaining,
+                'can_grant_retake' => $attempts > 0 && $remaining === 0,
+            ];
+        }, $statement->fetchAll());
+    }
+
+    public function grantStudentAssessmentRetake(int $facultyId, int $offeringId, int $studentId, int $assessmentId): array
+    {
+        return $this->transaction(function () use ($facultyId, $offeringId, $studentId, $assessmentId): array {
+            $eligible = $this->db->prepare("SELECT bank.id FROM faculty_subject_students enrollment
+                INNER JOIN faculty_subjects fs ON fs.id = enrollment.faculty_subject_id
+                INNER JOIN assessment_bank_subjects link ON link.faculty_subject_id = fs.id
+                INNER JOIN assessment_banks bank ON bank.id = link.assessment_bank_id AND bank.faculty_id = fs.faculty_id
+                WHERE fs.id = :offering AND fs.faculty_id = :faculty AND fs.is_active = 1 AND enrollment.student_id = :student
+                    AND bank.id = :assessment AND bank.is_active = 1
+                LIMIT 1 FOR UPDATE");
+            $eligible->execute(['offering' => $offeringId, 'faculty' => $facultyId, 'student' => $studentId, 'assessment' => $assessmentId]);
+            if (!$eligible->fetchColumn()) throw new HttpException(404, 'Active assessment not found for this student and subject.');
+
+            $count = $this->db->prepare('SELECT COUNT(*) FROM student_assessment_attempts WHERE assessment_bank_id = :assessment AND faculty_subject_id = :offering AND student_id = :student');
+            $count->execute(['assessment' => $assessmentId, 'offering' => $offeringId, 'student' => $studentId]);
+            $attempts = (int) $count->fetchColumn();
+            if ($attempts < 1) throw new HttpException(422, 'This student has not submitted the assessment yet, so a retake is not needed.');
+
+            $permission = $this->db->prepare('SELECT additional_attempts FROM student_assessment_retake_permissions WHERE assessment_bank_id = :assessment AND faculty_subject_id = :offering AND student_id = :student FOR UPDATE');
+            $permission->execute(['assessment' => $assessmentId, 'offering' => $offeringId, 'student' => $studentId]);
+            $additional = (int) ($permission->fetchColumn() ?: 0);
+            if ($additional - max(0, $attempts - 1) > 0) throw new HttpException(409, 'This student already has an unused retake for this assessment.');
+
+            $grant = $this->db->prepare('INSERT INTO student_assessment_retake_permissions
+                (assessment_bank_id, faculty_subject_id, student_id, additional_attempts, granted_by, granted_at, updated_at)
+                VALUES (:assessment, :offering, :student, :additional_attempts, :faculty, NOW(), NOW())
+                ON DUPLICATE KEY UPDATE additional_attempts = VALUES(additional_attempts), granted_by = VALUES(granted_by), granted_at = NOW(), updated_at = NOW()');
+            $grant->execute(['assessment' => $assessmentId, 'offering' => $offeringId, 'student' => $studentId, 'additional_attempts' => $attempts, 'faculty' => $facultyId]);
+
+            foreach ($this->studentAssessmentRetakes($facultyId, $offeringId, $studentId) as $assessment) {
+                if ((int) $assessment['id'] === $assessmentId) return $assessment;
+            }
+            throw new HttpException(404, 'Active assessment not found for this student and subject.');
+        });
     }
 
     public function assignedSubject(int $facultyId, int $subjectId): array
@@ -199,6 +356,7 @@ final class FacultyTeachingRepository
             'program_id' => $row['program_id'] === null ? null : (int) $row['program_id'], 'student_number' => $row['student_number'],
             'gender' => $row['gender'], 'mobile_number' => $row['mobile_number'], 'course_label' => $row['course_label'],
             'enrollment_status' => $row['enrollment_status'], 'source' => $row['source'], 'enrolled_at' => $row['enrolled_at'],
+            'login_count' => (int) ($row['login_count'] ?? 0), 'latest_login_at' => $row['latest_login_at'] ?? null,
         ];
     }
 }
