@@ -5,6 +5,7 @@ namespace Codify\Services;
 
 use Codify\Core\HttpException;
 use Codify\Repositories\SystemSettingRepository;
+use Codify\Repositories\StudentLoginEventRepository;
 use Codify\Repositories\TokenRepository;
 use Codify\Repositories\UserRepository;
 
@@ -14,10 +15,11 @@ final class AuthService
     private $tokens;
     private $settings;
     private $limiter;
+    private $loginEvents;
 
-    public function __construct(UserRepository $users, TokenRepository $tokens, SystemSettingRepository $settings, LoginRateLimiter $limiter)
+    public function __construct(UserRepository $users, TokenRepository $tokens, SystemSettingRepository $settings, LoginRateLimiter $limiter, StudentLoginEventRepository $loginEvents)
     {
-        $this->users = $users; $this->tokens = $tokens; $this->settings = $settings; $this->limiter = $limiter;
+        $this->users = $users; $this->tokens = $tokens; $this->settings = $settings; $this->limiter = $limiter; $this->loginEvents = $loginEvents;
     }
 
     public function login(string $login, string $password, string $ip): array
@@ -37,6 +39,15 @@ final class AuthService
             $this->users->rehashPassword((int) $user['id'], password_hash($password, PASSWORD_BCRYPT, ['cost' => $this->bcryptCost()]));
         }
         $token = $this->tokens->issue((int) $user['id'], max(15, min(1440, (int) $settings['session_timeout_minutes'])));
+        if ($user['role'] === 'student') {
+            [$tokenId] = explode('|', $token, 2);
+            try {
+                $this->loginEvents->record((int) $user['id'], (int) $tokenId, (int) $settings['device_retention_days']);
+            } catch (\Throwable $exception) {
+                $this->tokens->delete((int) $tokenId);
+                throw $exception;
+            }
+        }
         return ['token' => $token, 'user' => $this->users->payload($user)];
     }
 

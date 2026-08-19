@@ -3,6 +3,7 @@ declare(strict_types=1);
 
 use Codify\Core\Connection;
 use Codify\Repositories\DeviceConsistencyRepository;
+use Codify\Repositories\StudentLoginEventRepository;
 use Codify\Repositories\TokenRepository;
 use Codify\Services\DeviceFingerprintService;
 
@@ -40,6 +41,8 @@ try {
     $administratorToken = $tokens->issue($administratorId, 15);
     $studentToken = $tokens->issue($studentId, 15);
     [$studentTokenId] = explode('|', $studentToken, 2);
+    $loginEvents = new StudentLoginEventRepository($db);
+    $loginEvents->record($studentId, (int) $studentTokenId);
 
     $fingerprints = new DeviceFingerprintService(str_repeat('administrator-audit-test-key-', 2));
     $signals = [
@@ -71,16 +74,18 @@ try {
 
     $emailList = $request('GET', $base . '/admin/student-audit?search=' . urlencode('audit-student-' . $suffix . '@example.test'), $administratorToken);
     $idList = $request('GET', $base . '/admin/student-audit?search=' . $studentId, $administratorToken);
-    if ((int) ($emailList['data']['data'][0]['id'] ?? 0) !== $studentId || (int) ($idList['data']['data'][0]['id'] ?? 0) !== $studentId) throw new RuntimeException('Student audit email or ID search smoke test failed.');
+    $emailIds = array_map('intval', array_column($emailList['data']['data'] ?? [], 'id'));
+    $idIds = array_map('intval', array_column($idList['data']['data'] ?? [], 'id'));
+    if (!in_array($studentId, $emailIds, true) || !in_array($studentId, $idIds, true)) throw new RuntimeException('Student audit email or ID search smoke test failed.');
 
     $forbidden = $request('GET', $base . '/admin/student-audit', $studentToken);
     if (!is_array($forbidden) || !empty($forbidden['success'])) throw new RuntimeException('Student audit authorization smoke test failed.');
 
     $detail = $request('GET', $base . '/admin/student-audit/' . $studentId, $administratorToken);
-    if (!is_array($detail) || empty($detail['success']) || (int) ($detail['data']['fingerprinting']['summary']['total'] ?? 0) !== 1) throw new RuntimeException('Student audit dashboard endpoint smoke test failed.');
+    if (!is_array($detail) || empty($detail['success']) || (int) ($detail['data']['fingerprinting']['summary']['total'] ?? 0) !== 1 || (int) ($detail['data']['login_summary']['total'] ?? 0) !== 1 || count($detail['data']['login_events'] ?? []) !== 1) throw new RuntimeException('Student audit dashboard endpoint smoke test failed.');
 
     $cleared = $request('DELETE', $base . '/admin/student-audit/' . $studentId . '/login-events', $administratorToken);
-    if (!is_array($cleared) || empty($cleared['success']) || count($cleared['data']['fingerprinting']['events'] ?? []) !== 0 || count($cleared['data']['administrator_audit'] ?? []) !== 1 || (int) ($cleared['data']['active_sessions'] ?? 0) !== 1) throw new RuntimeException('Clear recorded logins endpoint smoke test failed.');
+    if (!is_array($cleared) || empty($cleared['success']) || count($cleared['data']['login_events'] ?? []) !== 0 || (int) ($cleared['data']['login_summary']['total'] ?? -1) !== 0 || count($cleared['data']['fingerprinting']['events'] ?? []) !== 0 || count($cleared['data']['administrator_audit'] ?? []) !== 1 || (int) ($cleared['data']['active_sessions'] ?? 0) !== 1) throw new RuntimeException('Clear recorded logins endpoint smoke test failed.');
 
     $removed = $request('DELETE', $base . '/admin/student-audit/' . $studentId . '/devices/' . (int) $device['id'], $administratorToken);
     if (!is_array($removed) || empty($removed['success']) || (int) ($removed['data']['fingerprinting']['summary']['total'] ?? -1) !== 0 || (int) ($removed['data']['active_sessions'] ?? -1) !== 0) throw new RuntimeException('Remove device endpoint smoke test failed.');

@@ -25,6 +25,7 @@ use Codify\Repositories\AdministratorAuditLogRepository;
 use Codify\Repositories\AdministratorDataCleanupRepository;
 use Codify\Repositories\AdministratorStudentAuditRepository;
 use Codify\Repositories\StudentLearningRepository;
+use Codify\Repositories\StudentLoginEventRepository;
 use Codify\Repositories\DeviceConsistencyRepository;
 use Codify\Repositories\AcademicStructureRepository;
 use Codify\Repositories\AssessmentBankRepository;
@@ -64,6 +65,7 @@ final class Application
         $teaching = new FacultyTeachingRepository($this->db);
         $problems = new ProblemBankRepository($this->db);
         $studentLearning = new StudentLearningRepository($this->db);
+        $studentLoginEvents = new StudentLoginEventRepository($this->db);
         $administratorStudentAudit = new AdministratorStudentAuditRepository($this->db);
         $administratorAuditLogs = new AdministratorAuditLogRepository($this->db);
         $administratorDataCleanup = new AdministratorDataCleanupRepository($this->db);
@@ -71,7 +73,7 @@ final class Application
         $runner = new Judge0RunnerService($runnerConfig);
         $syllabus = new SyllabusStorageService(require dirname(__DIR__) . '/config/syllabus.php');
         $executionLimiter = new CodeExecutionRateLimiter($this->db);
-        $authService = new AuthService($users, $tokens, $settings, new LoginRateLimiter($this->db));
+        $authService = new AuthService($users, $tokens, $settings, new LoginRateLimiter($this->db), $studentLoginEvents);
         $controllers = [
             'auth' => new AuthController($authService, $guard, $users, $tokens),
             'settings' => new SystemSettingController($settings, $guard),
@@ -84,7 +86,7 @@ final class Application
             'problem_bank' => new ProblemBankController($problems, $settings, $guard),
             'student_learning' => new StudentLearningController($studentLearning, $settings, $guard, $executionLimiter, $runner, (int) $runnerConfig['rate_limit_per_minute'], $syllabus),
             'student_devices' => new StudentDeviceController($deviceConsistency, $settings, $tokens, $guard, new DeviceFingerprintService(), new DeviceCredentialVerifier()),
-            'administrator_student_audit' => new AdministratorStudentAuditController($administratorStudentAudit, $administratorAuditLogs, $deviceConsistency, $tokens, $settings, $guard),
+            'administrator_student_audit' => new AdministratorStudentAuditController($administratorStudentAudit, $administratorAuditLogs, $deviceConsistency, $studentLoginEvents, $tokens, $settings, $guard),
             'administrator_data_cleanup' => new AdministratorDataCleanupController($administratorDataCleanup, $guard, $syllabus),
             'faculty_management' => new FacultyManagementController($users, $scopes, $facultyAdministration, $tokens, $settings, $guard, $syllabus),
             'academic' => new AcademicStructureController($academic, $guard),

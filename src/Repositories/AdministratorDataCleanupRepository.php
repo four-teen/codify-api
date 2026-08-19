@@ -12,7 +12,7 @@ final class AdministratorDataCleanupRepository
 
     private const DEFINITIONS = [
         'assessment_attempts' => ['label' => 'Assessment submissions', 'description' => 'Quiz and exam attempts, scores, answers, and retake permissions.'],
-        'device_records' => ['label' => 'Student device records', 'description' => 'Device consent, recognized devices, challenges, sessions, and device events.'],
+        'device_records' => ['label' => 'Student device and login records', 'description' => 'Successful login history, device consent, recognized devices, challenges, sessions, and device events.'],
         'students' => ['label' => 'Student accounts', 'description' => 'Student profiles, enrollments, sessions, submissions, code runs, and device records.'],
         'assessment_banks' => ['label' => 'Quiz and exam banks', 'description' => 'Assessment banks, questions, subject links, submissions, and retake permissions.'],
         'problem_banks' => ['label' => 'Problem bank', 'description' => 'Coding problems, test cases, and subject links.'],
@@ -89,6 +89,7 @@ final class AdministratorDataCleanupRepository
         $this->db->beginTransaction();
         try {
             if (in_array('device_records', $effective, true)) {
+                $this->db->exec('DELETE FROM student_login_events');
                 $this->db->exec('DELETE FROM student_devices');
                 $this->db->exec('DELETE FROM student_device_consents');
             }
@@ -148,7 +149,7 @@ final class AdministratorDataCleanupRepository
         $count = function (string $sql): int { return (int) $this->db->query($sql)->fetchColumn(); };
         return [
             'assessment_attempts' => $count('SELECT (SELECT COUNT(*) FROM student_assessment_attempts) + (SELECT COUNT(*) FROM student_assessment_retake_permissions)'),
-            'device_records' => $count('SELECT (SELECT COUNT(*) FROM student_device_consents) + (SELECT COUNT(*) FROM student_devices) + (SELECT COUNT(*) FROM student_device_challenges) + (SELECT COUNT(*) FROM student_device_events) + (SELECT COUNT(*) FROM student_device_sessions)'),
+            'device_records' => $count('SELECT (SELECT COUNT(*) FROM student_login_events) + (SELECT COUNT(*) FROM student_device_consents) + (SELECT COUNT(*) FROM student_devices) + (SELECT COUNT(*) FROM student_device_challenges) + (SELECT COUNT(*) FROM student_device_events) + (SELECT COUNT(*) FROM student_device_sessions)'),
             'students' => $count("SELECT COUNT(*) FROM users WHERE role = 'student'"),
             'assessment_banks' => $count('SELECT COUNT(*) FROM assessment_banks'),
             'problem_banks' => $count('SELECT COUNT(*) FROM coding_problems'),

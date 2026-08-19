@@ -60,7 +60,7 @@ final class AdministratorStudentAuditRepository
             ) ds ON ds.student_id = u.id
             LEFT JOIN (
                 SELECT student_id, COUNT(*) AS login_events, MAX(occurred_at) AS latest_login_at
-                FROM student_device_events WHERE event_type = \'session_start\' GROUP BY student_id
+                FROM student_login_events GROUP BY student_id
             ) es ON es.student_id = u.id
             WHERE ' . $where . '
             ORDER BY COALESCE(u.last_name, u.name), COALESCE(u.first_name, u.name), u.id
