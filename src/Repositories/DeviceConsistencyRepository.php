@@ -186,6 +186,8 @@ final class DeviceConsistencyRepository
         $statement = $this->db->prepare('INSERT IGNORE INTO student_device_events (student_id, device_id, access_token_id, event_type, match_status, changed_components, network_hash, occurred_at) VALUES (:student, :device, :token, \'session_start\', :match_status, :changed, :network, NOW())');
         $statement->execute(['student' => $studentId, 'device' => $deviceId, 'token' => $tokenId, 'match_status' => $matchStatus, 'changed' => $changed === [] ? null : json_encode($changed), 'network' => $networkHash]);
         if ($statement->rowCount() < 1) return false;
+        $eventId = (int) $this->db->lastInsertId();
+        $this->db->prepare('UPDATE student_login_events SET source_device_event_id = :event WHERE student_id = :student AND access_token_id = :token')->execute(['event' => $eventId, 'student' => $studentId, 'token' => $tokenId]);
         $update = $this->db->prepare('UPDATE student_devices SET fingerprint_hash = :fingerprint, component_hashes = :components, device_label = :device_label, browser_label = :browser_label, os_label = :os_label, device_type = :device_type, last_seen_at = NOW(), last_verified_at = NOW(), seen_count = seen_count + 1, updated_at = NOW() WHERE id = :device AND student_id = :student');
         $update->execute([
             'fingerprint' => $fingerprint['fingerprint_hash'], 'components' => json_encode($fingerprint['component_hashes']),
