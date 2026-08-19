@@ -77,6 +77,7 @@ return static function ($router, array $controllers): void {
     $router->post($prefix . '/student/device-consistency/decline', [$controllers['student_devices'], 'decline']);
     $router->delete($prefix . '/student/device-consistency/consent', [$controllers['student_devices'], 'withdraw']);
     $router->post($prefix . '/student/device-consistency/register', [$controllers['student_devices'], 'register']);
+    $router->post($prefix . '/student/device-consistency/observe', [$controllers['student_devices'], 'observe']);
     $router->post($prefix . '/student/device-consistency/challenge', [$controllers['student_devices'], 'challenge']);
     $router->post($prefix . '/student/device-consistency/verify', [$controllers['student_devices'], 'verify']);
     $router->patch($prefix . '/student/devices/{device}/recognize', [$controllers['student_devices'], 'recognize']);

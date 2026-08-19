@@ -20,7 +20,8 @@ try {
     $suffix = bin2hex(random_bytes(5));
     $username = 'manual-login-' . $suffix;
     $email = $username . '@example.test';
-    $password = 'temporary-test-password-123';
+    $password = bin2hex(random_bytes(24)) . 'Aa1!';
+    $incorrectPassword = bin2hex(random_bytes(24)) . 'Bb2!';
     $statement = $db->prepare('INSERT INTO users (faculty_id, first_name, last_name, name, username, email, password, role, is_active, must_change_password, created_at, updated_at) VALUES (NULL, \'Manual\', \'Login Test\', \'Manual Login Test\', :username, :email, :password, \'student\', 1, 0, NOW(), NOW())');
     $statement->execute(['username' => $username, 'email' => $email, 'password' => password_hash($password, PASSWORD_BCRYPT)]);
     $studentId = (int) $db->lastInsertId();
@@ -32,7 +33,7 @@ try {
     $auth->login($email, $password, '127.0.0.1');
 
     try {
-        $auth->login($username, 'incorrect-password', '127.0.0.1');
+        $auth->login($username, $incorrectPassword, '127.0.0.1');
         throw new RuntimeException('Invalid student credentials unexpectedly succeeded.');
     } catch (HttpException $exception) {
         if ($exception->status !== 401) throw $exception;

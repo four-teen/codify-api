@@ -38,7 +38,7 @@ final class StudentLoginEventRepository
     {
         $limit = max(1, min(100, $limit));
         $sql = 'SELECT l.id, l.occurred_at,
-            d.device_label, d.browser_label, d.os_label, d.device_type,
+            d.device_label, d.browser_label, d.os_label, d.device_type, d.public_key_jwk,
             e.match_status
             FROM student_login_events l
             LEFT JOIN student_device_events e ON e.id = l.source_device_event_id
@@ -51,7 +51,11 @@ final class StudentLoginEventRepository
         $rows = $statement->fetchAll();
         foreach ($rows as &$row) {
             $row['id'] = (int) $row['id'];
-            $row['device_verified'] = $row['device_label'] !== null;
+            $row['device_recorded'] = $row['device_label'] !== null;
+            $key = json_decode((string) ($row['public_key_jwk'] ?? ''), true);
+            $row['verification_method'] = !$row['device_recorded'] ? null : (is_array($key) && ($key['codify_mode'] ?? '') === 'browser_signals' ? 'browser_signals' : 'browser_key');
+            $row['device_verified'] = $row['verification_method'] === 'browser_key';
+            unset($row['public_key_jwk']);
         }
         unset($row);
         return $rows;

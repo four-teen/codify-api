@@ -15,6 +15,7 @@ $studentId = 0;
 
 try {
     $suffix = bin2hex(random_bytes(5));
+    $passwordHash = password_hash(bin2hex(random_bytes(24)), PASSWORD_BCRYPT);
     $insert = $db->prepare('INSERT INTO users (faculty_id, first_name, last_name, name, username, email, password, role, is_active, must_change_password, created_at, updated_at) VALUES (NULL, :first_name, :last_name, :name, :username, :email, :password, :role, 1, 0, NOW(), NOW())');
     $insert->execute([
         'first_name' => 'Audit',
@@ -22,7 +23,7 @@ try {
         'name' => 'Audit Administrator',
         'username' => 'audit-admin-' . $suffix,
         'email' => 'audit-admin-' . $suffix . '@example.test',
-        'password' => password_hash('temporary-test-password-123', PASSWORD_BCRYPT),
+        'password' => $passwordHash,
         'role' => 'administrator',
     ]);
     $administratorId = (int) $db->lastInsertId();
@@ -32,7 +33,7 @@ try {
         'name' => 'Student AuditSearch' . $suffix,
         'username' => 'audit-student-' . $suffix,
         'email' => 'audit-student-' . $suffix . '@example.test',
-        'password' => password_hash('temporary-test-password-123', PASSWORD_BCRYPT),
+        'password' => $passwordHash,
         'role' => 'student',
     ]);
     $studentId = (int) $db->lastInsertId();
@@ -54,7 +55,7 @@ try {
     ];
     $deviceRepository = new DeviceConsistencyRepository($db);
     $fingerprint = $fingerprints->build($studentId, $signals);
-    $device = $deviceRepository->createDevice($studentId, str_repeat('a', 43), json_encode(['kty' => 'EC']), $fingerprint, 'recognized');
+    $device = $deviceRepository->createObservedDevice($studentId, str_repeat('a', 43), $fingerprint, 'recognized');
     $deviceRepository->recordSession($studentId, (int) $device['id'], (int) $studentTokenId, 'first_seen', [], null, $fingerprint);
 
     $base = rtrim((string) env('CODIFY_TEST_API_URL', 'http://localhost/codify-api/api/v1'), '/');
@@ -82,7 +83,8 @@ try {
     if (!is_array($forbidden) || !empty($forbidden['success'])) throw new RuntimeException('Student audit authorization smoke test failed.');
 
     $detail = $request('GET', $base . '/admin/student-audit/' . $studentId, $administratorToken);
-    if (!is_array($detail) || empty($detail['success']) || (int) ($detail['data']['fingerprinting']['summary']['total'] ?? 0) !== 1 || (int) ($detail['data']['login_summary']['total'] ?? 0) !== 1 || count($detail['data']['login_events'] ?? []) !== 1) throw new RuntimeException('Student audit dashboard endpoint smoke test failed.');
+    $recordedLogin = $detail['data']['login_events'][0] ?? [];
+    if (!is_array($detail) || empty($detail['success']) || empty($detail['data']['fingerprinting']['configured']) || (int) ($detail['data']['fingerprinting']['summary']['total'] ?? 0) !== 1 || (int) ($detail['data']['login_summary']['total'] ?? 0) !== 1 || count($detail['data']['login_events'] ?? []) !== 1 || ($recordedLogin['verification_method'] ?? '') !== 'browser_signals' || empty($recordedLogin['device_recorded']) || !empty($recordedLogin['device_verified'])) throw new RuntimeException('Student audit dashboard endpoint smoke test failed.');
 
     $cleared = $request('DELETE', $base . '/admin/student-audit/' . $studentId . '/login-events', $administratorToken);
     if (!is_array($cleared) || empty($cleared['success']) || count($cleared['data']['login_events'] ?? []) !== 0 || (int) ($cleared['data']['login_summary']['total'] ?? -1) !== 0 || count($cleared['data']['fingerprinting']['events'] ?? []) !== 0 || count($cleared['data']['administrator_audit'] ?? []) !== 1 || (int) ($cleared['data']['active_sessions'] ?? 0) !== 1) throw new RuntimeException('Clear recorded logins endpoint smoke test failed.');

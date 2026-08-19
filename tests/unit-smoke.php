@@ -12,7 +12,8 @@ require dirname(__DIR__) . '/bootstrap/autoload.php';
 
 $validatorRejectedWeakPassword = false;
 try {
-    $validator = new Validator(['password' => 'short', 'password_confirmation' => 'short']);
+    $weakPassword = str_repeat('x', 5);
+    $validator = new Validator(['password' => $weakPassword, 'password_confirmation' => $weakPassword]);
     $validator->password(true);
     $validator->throwIfFailed();
 } catch (HttpException $exception) {

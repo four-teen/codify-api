@@ -39,7 +39,7 @@ The API uses prepared PDO statements, Bcrypt passwords, hashed expiring tokens, 
 
 Existing installations should import `database/device-consistency.sql` once. Set `DEVICE_FINGERPRINT_KEY` to a private random value of at least 32 characters, then enable device consistency from administrator system settings. The setting is disabled by default and student acknowledgment is required by default.
 
-The feature stores student-scoped HMAC signatures of coarse browser characteristics and public P-256 device keys. Browser private keys remain non-exportable in IndexedDB. It does not collect biometric fingerprints, precise location, browsing history, raw IP addresses, or student files.
+The feature stores student-scoped HMAC signatures of coarse browser characteristics and public P-256 device keys. Browser private keys remain non-exportable in IndexedDB. When a limited mobile or embedded browser cannot retain a protected P-256 key, Codify records the same privacy-conscious browser signals in a clearly labeled compatibility mode; it never presents that lower-assurance record as cryptographically verified. It does not collect biometric fingerprints, precise location, browsing history, raw IP addresses, or student files.
 
 When acknowledgment is required, student workspace endpoints remain locked until the current policy notice is accepted. Declining records the decision and revokes the current login session; after acceptance, collection continues in the background without a student-facing device-verification dashboard.
 
@@ -57,7 +57,7 @@ Existing installations that already imported the device-consistency migration sh
 
 Administrator-only endpoints under `/api/v1/admin/student-audit` provide the complete student directory, last-name/email/student-ID/database-ID search, per-student device-verification and login-event dashboards, session revocation, recorded-login cleanup, individual device removal, and full recognized-device reset. Successful student authentication is recorded independently of browser device-key support, while a matching device verification is linked when available. Successful-login history uses the configured device-retention period and expired events are pruned during student authentication. Cleanup operations are recorded in a separate administrator audit trail that is not erased with device data.
 
-Run `php tests/administrator-student-audit-api-smoke.php` to validate the directory, authorization, searches, dashboard, login cleanup, and recognized-device reset against temporary accounts.
+Run `php tests/administrator-student-audit-api-smoke.php` to validate the directory, authorization, searches, dashboard, login cleanup, and recognized-device reset against temporary accounts. Run `php tests/test-credential-hygiene-smoke.php` before committing to ensure smoke tests generate credentials at runtime instead of storing password literals that secret scanners can flag.
 
 ## Administrator faculty cleanup
 

@@ -13,6 +13,7 @@ use Codify\Repositories\SystemSettingRepository;
 use Codify\Repositories\StudentLoginEventRepository;
 use Codify\Repositories\TokenRepository;
 use Codify\Services\AuthGuard;
+use Codify\Services\DeviceFingerprintService;
 
 final class AdministratorStudentAuditController
 {
@@ -23,8 +24,9 @@ final class AdministratorStudentAuditController
     private $tokens;
     private $settings;
     private $guard;
+    private $fingerprints;
 
-    public function __construct(AdministratorStudentAuditRepository $students, AdministratorAuditLogRepository $audit, DeviceConsistencyRepository $devices, StudentLoginEventRepository $loginEvents, TokenRepository $tokens, SystemSettingRepository $settings, AuthGuard $guard)
+    public function __construct(AdministratorStudentAuditRepository $students, AdministratorAuditLogRepository $audit, DeviceConsistencyRepository $devices, StudentLoginEventRepository $loginEvents, TokenRepository $tokens, SystemSettingRepository $settings, AuthGuard $guard, DeviceFingerprintService $fingerprints)
     {
         $this->students = $students;
         $this->audit = $audit;
@@ -33,6 +35,7 @@ final class AdministratorStudentAuditController
         $this->tokens = $tokens;
         $this->settings = $settings;
         $this->guard = $guard;
+        $this->fingerprints = $fingerprints;
     }
 
     public function index(Request $request): void
@@ -129,6 +132,7 @@ final class AdministratorStudentAuditController
             'student' => $student,
             'fingerprinting' => [
                 'enabled' => (bool) $settings['device_consistency_enabled'],
+                'configured' => $this->fingerprints->configured(),
                 'status' => $status,
                 'summary' => $summary,
                 'devices' => $devices,

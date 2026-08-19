@@ -9,15 +9,16 @@ require dirname(__DIR__) . '/bootstrap/autoload.php';
 $db = Connection::make(); $studentId = 0;
 try {
     $suffix = bin2hex(random_bytes(5));
+    $passwordHash = password_hash(bin2hex(random_bytes(24)), PASSWORD_BCRYPT);
     $sql = 'INSERT INTO users (faculty_id, first_name, last_name, name, username, email, password, role, is_active, must_change_password, created_at, updated_at) VALUES (NULL, \'API\', \'Device Test\', \'API Device Test\', :username, :email, :password, \'student\', 1, 0, NOW(), NOW())';
     $statement = $db->prepare($sql);
-    $statement->execute(['username' => 'api-device-' . $suffix, 'email' => 'api-device-' . $suffix . '@example.test', 'password' => password_hash('temporary-test-password-123', PASSWORD_BCRYPT)]);
+    $statement->execute(['username' => 'api-device-' . $suffix, 'email' => 'api-device-' . $suffix . '@example.test', 'password' => $passwordHash]);
     $studentId = (int) $db->lastInsertId(); $token = (new TokenRepository($db))->issue($studentId, 15);
     $base = rtrim((string) env('CODIFY_TEST_API_URL', 'http://localhost/codify-api/api/v1'), '/');
-    $request = static function (string $method, string $url, string $token) {
+    $request = static function (string $method, string $url, string $token, array $body = []) {
         $headers = ['Accept: application/json', 'Authorization: Bearer ' . $token];
         $options = ['http' => ['method' => $method, 'header' => implode(chr(13) . chr(10), $headers), 'ignore_errors' => true]];
-        if ($method !== 'GET') { $options['http']['header'] .= chr(13) . chr(10) . 'Content-Type: application/json'; $options['http']['content'] = '{}'; }
+        if ($method !== 'GET') { $options['http']['header'] .= chr(13) . chr(10) . 'Content-Type: application/json'; $options['http']['content'] = json_encode($body); }
         $raw = file_get_contents($url, false, stream_context_create($options));
         return is_string($raw) ? json_decode($raw, true) : null;
     };
@@ -29,6 +30,17 @@ try {
     }
     $consent = $request('POST', $base . '/student/device-consistency/consent', $token);
     if (!is_array($consent) || empty($consent['success']) || empty($consent['data']['consented'])) throw new RuntimeException('Device consent endpoint smoke test failed.');
+    $signals = [
+        'version' => '1', 'browser_family' => 'Compatibility Browser', 'browser_major' => '1', 'os_family' => 'Test OS',
+        'device_type' => 'mobile', 'platform' => 'test', 'timezone' => 'Asia/Manila', 'languages' => ['en'],
+        'screen_bucket' => '400x800', 'pixel_ratio_bucket' => '2', 'color_depth' => '24',
+        'hardware_concurrency_bucket' => 'up-to-4', 'device_memory_bucket' => 'unavailable',
+        'max_touch_points' => 'up-to-5', 'storage_available' => false,
+    ];
+    $credentialId = rtrim(strtr(base64_encode(random_bytes(32)), '+/', '-_'), '=');
+    $observed = $request('POST', $base . '/student/device-consistency/observe', $token, ['credential_id' => $credentialId, 'signals' => $signals]);
+    $observedDevice = $observed['data']['overview']['devices'][0] ?? [];
+    if (!is_array($observed) || empty($observed['success']) || ($observedDevice['verification_method'] ?? '') !== 'browser_signals') throw new RuntimeException('Compatibility browser recording endpoint smoke test failed.');
     $workspace = $request('GET', $base . '/student/workspace', $token);
     if (!is_array($workspace) || empty($workspace['success'])) throw new RuntimeException('Student workspace access after device consent smoke test failed.');
     $declined = $request('POST', $base . '/student/device-consistency/decline', $token);
