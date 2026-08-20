@@ -183,6 +183,7 @@ final class FacultyTeachingController
 
     private function saveStudent(int $facultyId, int $offeringId, array $input, string $source): array
     {
+        if ($source === 'import' && isset($input['full_name'])) $input['full_name'] = $this->repairImportedName((string) $input['full_name']);
         $offering = $this->teaching->offering($facultyId, $offeringId); $data = $this->studentData($input);
         return $this->teaching->transaction(function () use ($facultyId, $offeringId, $offering, $data, $source) {
             $existing = $this->users->findStudentByNumber($data['student_number']);
@@ -193,6 +194,9 @@ final class FacultyTeachingController
                 if ($profile && (int) $profile['program_id'] !== (int) $offering['program_id']) throw new HttpException(422, 'This student already belongs to a different program.');
                 if ($data['email'] !== null && strcasecmp((string) $existing['email'], $data['email']) !== 0) {
                     $emailDiscrepancy = 'The class-list email differs from the existing account. The registered email was kept unchanged.';
+                }
+                if ($source === 'import' && $this->hasBrokenNameEncoding($existing)) {
+                    $existing = $this->users->repairStudentName((int) $existing['id'], $data['first_name'], $data['last_name']);
                 }
                 $student = $existing;
             } else {
@@ -258,6 +262,32 @@ final class FacultyTeachingController
         }
         if ($firstName === '' || $lastName === '') throw new HttpException(422, 'Use the class-list name format LASTNAME, GIVEN NAMES.');
         return [$firstName, $lastName];
+    }
+
+    private function repairImportedName(string $name): string
+    {
+        $name = str_replace(
+            ["\xC3\x83\xC2\x91", "\xC3\x83\xE2\x80\x98", "\xC3\x83\xC2\xB1"],
+            ["\xC3\x91", "\xC3\x91", "\xC3\xB1"],
+            trim($name)
+        );
+        $previous = '';
+        while ($previous !== $name) {
+            $previous = $name;
+            $name = (string) preg_replace('/([A-Z])\x{FFFD}(?=[A-Z])/u', '$1' . "\xC3\x91", $name);
+            $name = (string) preg_replace('/([a-z])\x{FFFD}(?=[a-z])/u', '$1' . "\xC3\xB1", $name);
+        }
+        if (strpos($name, "\xEF\xBF\xBD") !== false) throw new HttpException(422, 'The student name contains an unreadable character. Save the class list as .xlsx and import it again.');
+        if (class_exists('Normalizer')) $name = \Normalizer::normalize($name, \Normalizer::FORM_C) ?: $name;
+        return $name;
+    }
+
+    private function hasBrokenNameEncoding(array $student): bool
+    {
+        $name = implode(' ', [(string) ($student['first_name'] ?? ''), (string) ($student['last_name'] ?? ''), (string) ($student['name'] ?? '')]);
+        return strpos($name, "\xEF\xBF\xBD") !== false
+            || strpos($name, "\xC3\x83\xC2\x91") !== false
+            || strpos($name, "\xC3\x83\xC2\xB1") !== false;
     }
 
     private function uniqueEmailLocal(string $base): string

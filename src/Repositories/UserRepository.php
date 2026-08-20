@@ -167,6 +167,13 @@ final class UserRepository
         $this->db->prepare('UPDATE users SET password = :password, must_change_password = 0, updated_at = NOW() WHERE id = :id')->execute(['password' => $hash, 'id' => $id]);
     }
 
+    public function repairStudentName(int $id, string $firstName, string $lastName): array
+    {
+        $statement = $this->db->prepare("UPDATE users SET first_name = :first_name, last_name = :last_name, name = :name, updated_at = NOW() WHERE id = :id AND role = 'student'");
+        $statement->execute(['first_name' => $firstName, 'last_name' => $lastName, 'name' => trim($firstName . ' ' . $lastName), 'id' => $id]);
+        return $this->find($id) ?: [];
+    }
+
     public function setTemporaryPassword(int $id, string $hash): void
     {
         $this->db->prepare('UPDATE users SET password = :password, must_change_password = 1, updated_at = NOW() WHERE id = :id')->execute(['password' => $hash, 'id' => $id]);
