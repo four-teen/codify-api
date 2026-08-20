@@ -96,6 +96,12 @@ return static function ($router, array $controllers): void {
     $router->post($prefix . '/faculty/subject-offerings/{offering}/students/{student}/password-reset', [$controllers['faculty_teaching'], 'resetStudentPassword']);
     $router->delete($prefix . '/faculty/subject-offerings/{offering}/students', [$controllers['faculty_teaching'], 'destroyStudents']);
     $router->delete($prefix . '/faculty/subject-offerings/{offering}/students/{student}', [$controllers['faculty_teaching'], 'destroyStudent']);
+    $router->get($prefix . '/faculty/subject-offerings/{offering}/grades', [$controllers['subject_gradebook'], 'show']);
+    $router->patch($prefix . '/faculty/subject-offerings/{offering}/grades/settings', [$controllers['subject_gradebook'], 'updateSettings']);
+    $router->post($prefix . '/faculty/subject-offerings/{offering}/grades/items', [$controllers['subject_gradebook'], 'storeItem']);
+    $router->patch($prefix . '/faculty/subject-offerings/{offering}/grades/items/{item}', [$controllers['subject_gradebook'], 'updateItem']);
+    $router->delete($prefix . '/faculty/subject-offerings/{offering}/grades/items/{item}', [$controllers['subject_gradebook'], 'destroyItem']);
+    $router->put($prefix . '/faculty/subject-offerings/{offering}/grades/scores', [$controllers['subject_gradebook'], 'saveScores']);
     $router->get($prefix . '/faculty/subject-offerings/{offering}', [$controllers['faculty_teaching'], 'show']);
     $router->delete($prefix . '/faculty/subject-offerings/{offering}', [$controllers['faculty_teaching'], 'destroy']);
 

@@ -16,6 +16,7 @@ use Codify\Controllers\FacultyManagementController;
 use Codify\Controllers\SystemSettingController;
 use Codify\Controllers\StudentLearningController;
 use Codify\Controllers\StudentDeviceController;
+use Codify\Controllers\SubjectGradebookController;
 use Codify\Controllers\UserController;
 use Codify\Controllers\WorkspaceController;
 use Codify\Core\Request;
@@ -26,6 +27,7 @@ use Codify\Repositories\AdministratorDataCleanupRepository;
 use Codify\Repositories\AdministratorStudentAuditRepository;
 use Codify\Repositories\StudentLearningRepository;
 use Codify\Repositories\StudentLoginEventRepository;
+use Codify\Repositories\SubjectGradebookRepository;
 use Codify\Repositories\DeviceConsistencyRepository;
 use Codify\Repositories\AcademicStructureRepository;
 use Codify\Repositories\AssessmentBankRepository;
@@ -66,6 +68,7 @@ final class Application
         $problems = new ProblemBankRepository($this->db);
         $studentLearning = new StudentLearningRepository($this->db);
         $studentLoginEvents = new StudentLoginEventRepository($this->db);
+        $subjectGradebooks = new SubjectGradebookRepository($this->db);
         $administratorStudentAudit = new AdministratorStudentAuditRepository($this->db);
         $administratorAuditLogs = new AdministratorAuditLogRepository($this->db);
         $administratorDataCleanup = new AdministratorDataCleanupRepository($this->db);
@@ -86,6 +89,7 @@ final class Application
             'faculty_teaching' => new FacultyTeachingController($teaching, $users, $tokens, $settings, $guard, $syllabus),
             'problem_bank' => new ProblemBankController($problems, $settings, $guard),
             'student_learning' => new StudentLearningController($studentLearning, $settings, $guard, $executionLimiter, $runner, (int) $runnerConfig['rate_limit_per_minute'], $syllabus),
+            'subject_gradebook' => new SubjectGradebookController($subjectGradebooks, $guard),
             'student_devices' => new StudentDeviceController($deviceConsistency, $settings, $tokens, $guard, $fingerprints, new DeviceCredentialVerifier()),
             'administrator_student_audit' => new AdministratorStudentAuditController($administratorStudentAudit, $administratorAuditLogs, $deviceConsistency, $studentLoginEvents, $tokens, $settings, $guard, $fingerprints),
             'administrator_data_cleanup' => new AdministratorDataCleanupController($administratorDataCleanup, $guard, $syllabus),
