@@ -39,6 +39,17 @@ if ($matchedId !== '42') {
     throw new RuntimeException('Parameterized-route smoke test failed.');
 }
 
+$_SERVER['REQUEST_METHOD'] = 'PUT';
+$_SERVER['REQUEST_URI'] = '/codify-api/api/v1/faculty/subject-offerings/7/grades/scores';
+$putRequest = Request::capture();
+$putMatched = false;
+$putRouter = new Router();
+$putRouter->put('/api/v1/faculty/subject-offerings/{offering}/grades/scores', static function (Request $request) use (&$putMatched): void {
+    $putMatched = $request->route('offering') === '7';
+});
+$putRouter->dispatch($putRequest);
+if (!$putMatched) throw new RuntimeException('PUT-route smoke test failed.');
+
 $signals = [
     'version' => '1', 'browser_family' => 'Chrome', 'browser_major' => '140', 'os_family' => 'Windows',
     'device_type' => 'desktop', 'platform' => 'Win32', 'timezone' => 'Asia/Manila', 'languages' => ['en-US'],

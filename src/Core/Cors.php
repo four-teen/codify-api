@@ -15,7 +15,7 @@ final class Cors
         if ($origin !== '' && in_array(rtrim($origin, '/'), $allowed, true)) {
             header('Access-Control-Allow-Origin: ' . $origin);
             header('Vary: Origin');
-            header('Access-Control-Allow-Methods: GET, POST, PATCH, DELETE, OPTIONS');
+            header('Access-Control-Allow-Methods: GET, POST, PUT, PATCH, DELETE, OPTIONS');
             header('Access-Control-Allow-Headers: Accept, Authorization, Content-Type, Origin');
             header('Access-Control-Expose-Headers: Content-Disposition, Content-Length');
             header('Access-Control-Max-Age: 600');

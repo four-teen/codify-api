@@ -51,6 +51,16 @@ Existing installations should import `database/student-assessment-attempts.sql` 
 
 Run `php tests/quiz-retake-smoke.php` to validate quiz locking and faculty retake eligibility against an existing submitted quiz when one is available.
 
+## Faculty subject gradebook
+
+Existing installations should import `database/subject-gradebook.sql` once before deploying the gradebook API. New installations receive the same additive tables through either full schema. The migration does not alter quiz banks, questions, student submissions, attempt limits, or retake permissions.
+
+Each subject receives editable Midterm and Final Term category weights. Existing quizzes, exams, and coding activities assigned to the subject are offered for explicit faculty selection and do not count toward grades until added to a category. Quiz and exam results are read from the existing final attempt average, remain read-only in the gradebook, and cannot be overridden through the gradebook API. Custom/offline activities and manually entered scores are stored separately from student submissions. Coding activities remain manually scored until finalized coding results are persisted by the application.
+
+Grades use `40 + (raw percentage × 60%)` within each category, weighted term totals, and `(Midterm + Final Term) / 2` for the overall final score. Draft, published, and locked term states are available; a term cannot be locked while grades are incomplete.
+
+Run `php tests/subject-gradebook-smoke.php` to validate default weights, Base-40 calculations, faculty scoring, and quiz-attempt isolation against an existing subject and enrolled student when available.
+
 ## Administrator student audit
 
 Existing installations that already imported the device-consistency migration should also import `database/administrator-student-audit.sql` and `database/student-login-events.sql` once. Import the login-events migration before deploying API code that records successful student authentication. New installations receive these tables through either full schema.
