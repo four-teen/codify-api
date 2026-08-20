@@ -55,6 +55,23 @@ $changedSignals = $signals; $changedSignals['timezone'] = 'UTC'; $changed = $fin
 $changedComponents = $fingerprints->changedComponents(json_encode($first['component_hashes']), $changed['component_hashes']);
 if (!in_array('timezone', $changedComponents, true)) throw new RuntimeException('Device-change explanation smoke test failed.');
 
+$originalFingerprintKey = getenv('DEVICE_FINGERPRINT_KEY');
+$managedKeyPath = sys_get_temp_dir() . DIRECTORY_SEPARATOR . 'codify-device-key-' . bin2hex(random_bytes(8));
+try {
+    putenv('DEVICE_FINGERPRINT_KEY=');
+    $managedFingerprints = new DeviceFingerprintService(null, $managedKeyPath);
+    $managedFirst = $managedFingerprints->build(10, $signals);
+    $managedReloaded = new DeviceFingerprintService(null, $managedKeyPath);
+    $managedSecond = $managedReloaded->build(10, $signals);
+    if ($managedFingerprints->configurationSource() !== 'managed_file' || !is_file($managedKeyPath) || !hash_equals($managedFirst['fingerprint_hash'], $managedSecond['fingerprint_hash'])) {
+        throw new RuntimeException('Managed device fingerprint key smoke test failed.');
+    }
+} finally {
+    if (is_file($managedKeyPath)) unlink($managedKeyPath);
+    if ($originalFingerprintKey === false) putenv('DEVICE_FINGERPRINT_KEY');
+    else putenv('DEVICE_FINGERPRINT_KEY=' . $originalFingerprintKey);
+}
+
 $verifier = new DeviceCredentialVerifier();
 $public = $verifier->normalizeJwk(['kty' => 'EC', 'crv' => 'P-256', 'x' => '9hh3343hyRH7u0lK91wyMkXLo_LwZ51gxbMWoQz0dBk', 'y' => 'rZuRHfZnLdauVyrjmI5FVFd7PvAuYl1HE7Oai-htS9A']);
 $message = $verifier->message(str_repeat('a', 64), 'test-challenge', str_repeat('b', 43));

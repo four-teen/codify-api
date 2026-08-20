@@ -1,4 +1,5 @@
 .env
 vendor/
 *.log
+/storage/device-fingerprint.key
 

@@ -16,13 +16,33 @@ final class DeviceFingerprintService
 
     /** @var string */
     private $secret;
+    /** @var string */
+    private $configurationSource = 'unavailable';
 
-    public function __construct(?string $secret = null)
+    public function __construct(?string $secret = null, ?string $managedKeyPath = null)
     {
-        $this->secret = trim((string) ($secret === null ? env('DEVICE_FINGERPRINT_KEY', '') : $secret));
+        if ($secret !== null) {
+            $this->secret = trim($secret);
+            $this->configurationSource = $this->usableSecret($this->secret) ? 'provided' : 'unavailable';
+            return;
+        }
+
+        $environmentSecret = trim((string) env('DEVICE_FINGERPRINT_KEY', ''));
+        if ($this->usableSecret($environmentSecret)) {
+            $this->secret = $environmentSecret;
+            $this->configurationSource = 'environment';
+            return;
+        }
+
+        $defaultPath = dirname(__DIR__, 2) . DIRECTORY_SEPARATOR . 'storage' . DIRECTORY_SEPARATOR . 'device-fingerprint.key';
+        $path = trim((string) ($managedKeyPath ?? env('DEVICE_FINGERPRINT_KEY_FILE', $defaultPath)));
+        $this->secret = $this->managedSecret($path);
+        if ($this->usableSecret($this->secret)) $this->configurationSource = 'managed_file';
     }
 
-    public function configured(): bool { return strlen($this->secret) >= 32; }
+    public function configured(): bool { return $this->usableSecret($this->secret); }
+
+    public function configurationSource(): string { return $this->configurationSource; }
 
     public function build(int $studentId, array $signals): array
     {
@@ -122,8 +142,48 @@ final class DeviceFingerprintService
 
     private function encode($value): string { return (string) json_encode($value, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE); }
     private function hmac(string $value): string { return hash_hmac('sha256', $value, $this->secret); }
+    private function usableSecret(string $secret): bool
+    {
+        if (strlen($secret) < 32) return false;
+        return preg_match('/(?:replace[-_ ]with|change[-_ ]me|example[-_ ]key|your[-_ ]secret)/i', $secret) !== 1;
+    }
+
+    private function managedSecret(string $path): string
+    {
+        if ($path === '') return '';
+        $directory = dirname($path);
+        if (!is_dir($directory) || !is_writable($directory)) {
+            error_log('Codify device fingerprint key storage is not writable: ' . $directory);
+            return '';
+        }
+
+        $handle = @fopen($path, 'c+b');
+        if ($handle === false) {
+            error_log('Codify could not open its managed device fingerprint key file.');
+            return '';
+        }
+
+        try {
+            if (!flock($handle, LOCK_EX)) return '';
+            rewind($handle);
+            $stored = trim((string) stream_get_contents($handle));
+            if ($this->usableSecret($stored)) return $stored;
+
+            $generated = bin2hex(random_bytes(32));
+            if (!ftruncate($handle, 0) || !rewind($handle) || fwrite($handle, $generated . PHP_EOL) === false || !fflush($handle)) return '';
+            @chmod($path, 0600);
+            return $generated;
+        } catch (\Throwable $exception) {
+            error_log('Codify could not create its managed device fingerprint key: ' . $exception->getMessage());
+            return '';
+        } finally {
+            @flock($handle, LOCK_UN);
+            fclose($handle);
+        }
+    }
+
     private function assertConfigured(): void
     {
-        if (!$this->configured()) throw new HttpException(503, 'Device consistency is not configured on the server.', [], 'DEVICE_CONSISTENCY_UNAVAILABLE');
+        if (!$this->configured()) throw new HttpException(503, 'Device consistency could not initialize its server key. Ensure the storage directory is writable or set DEVICE_FINGERPRINT_KEY.', [], 'DEVICE_CONSISTENCY_UNAVAILABLE');
     }
 }
