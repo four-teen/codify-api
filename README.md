@@ -37,7 +37,7 @@ The API uses prepared PDO statements, Bcrypt passwords, hashed expiring tokens, 
 
 ## Student device consistency
 
-Existing installations should import `database/device-consistency.sql` once. Set `DEVICE_FINGERPRINT_KEY` to a private random value of at least 32 characters, then enable device consistency from administrator system settings. The setting is disabled by default and student acknowledgment is required by default.
+Existing installations should import `database/device-consistency.sql` once, then enable device consistency from administrator system settings. Prefer setting `DEVICE_FINGERPRINT_KEY` to a stable private random value of at least 32 characters. If it is missing or left as a placeholder, Codify securely creates `storage/device-fingerprint.key`; the storage directory must be writable and that generated file must be preserved across deployments. The setting is disabled by default and student acknowledgment is required by default.
 
 The feature stores student-scoped HMAC signatures of coarse browser characteristics and public P-256 device keys. Browser private keys remain non-exportable in IndexedDB. When a limited mobile or embedded browser cannot retain a protected P-256 key, Codify records the same privacy-conscious browser signals in a clearly labeled compatibility mode; it never presents that lower-assurance record as cryptographically verified. It does not collect biometric fingerprints, precise location, browsing history, raw IP addresses, or student files.
 

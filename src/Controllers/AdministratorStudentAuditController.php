@@ -133,6 +133,7 @@ final class AdministratorStudentAuditController
             'fingerprinting' => [
                 'enabled' => (bool) $settings['device_consistency_enabled'],
                 'configured' => $this->fingerprints->configured(),
+                'key_source' => $this->fingerprints->configurationSource(),
                 'status' => $status,
                 'summary' => $summary,
                 'devices' => $devices,
