@@ -10,6 +10,7 @@ use Codify\Controllers\AcademicStructureController;
 use Codify\Controllers\AssessmentBankController;
 use Codify\Controllers\FacultySubjectController;
 use Codify\Controllers\FacultyTeachingController;
+use Codify\Controllers\FacultyStudentViewController;
 use Codify\Controllers\ProblemBankController;
 use Codify\Controllers\FacultyStudentController;
 use Codify\Controllers\FacultyManagementController;
@@ -89,6 +90,7 @@ final class Application
             'faculty_subjects' => new FacultySubjectController($scopes, $guard),
             'assessment_bank' => new AssessmentBankController($assessmentBanks, $settings, $guard),
             'faculty_teaching' => new FacultyTeachingController($teaching, $users, $tokens, $settings, $guard, $syllabus),
+            'faculty_student_view' => new FacultyStudentViewController($teaching, $studentLearning, $settings, $guard, $syllabus),
             'problem_bank' => new ProblemBankController($problems, $settings, $guard),
             'student_learning' => new StudentLearningController($studentLearning, $settings, $guard, $executionLimiter, $runner, (int) $runnerConfig['rate_limit_per_minute'], $syllabus),
             'subject_gradebook' => new SubjectGradebookController($subjectGradebooks, $guard),

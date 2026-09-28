@@ -38,6 +38,7 @@ try {
     };
     $faculty = $makeUser('faculty', 'AttendanceFaculty'); $otherFaculty = $makeUser('faculty', 'OtherFaculty');
     $studentA = $makeUser('student', 'Student A'); $studentB = $makeUser('student', 'Student B'); $studentC = $makeUser('student', 'Student C');
+    $db->prepare('UPDATE users SET first_name = ?, last_name = ?, name = ? WHERE id = ?')->execute(['Ana O.', 'Dela Cruz', 'Ana O. Dela Cruz', $studentA]);
     $query = $db->prepare("INSERT INTO faculty_subjects (faculty_id, subject_id, section, academic_year, academic_term, is_active) VALUES (?, ?, ?, '2026-2027', 'First Semester', 1)");
     $query->execute([$faculty, $subjectId, 'attendance-test-' . $suffix]); $offeringId = (int) $db->lastInsertId();
     $enroll = $db->prepare('INSERT INTO faculty_subject_students (faculty_subject_id, student_id) VALUES (?, ?)');
@@ -46,6 +47,8 @@ try {
     $future = (new DateTimeImmutable($today))->modify('+1 day')->format('Y-m-d');
     $blank = $repository->sheet($faculty, $offeringId, $past);
     checkAttendance($blank['session'] === null && count($blank['students']) === 2, 'A new date must use the current roster.');
+    $names = array_column($blank['students'], null, 'student_id');
+    checkAttendance($names[$studentA]['first_name'] === 'Ana O.' && $names[$studentA]['last_name'] === 'Dela Cruz', 'Attendance must expose the full surname and given names.');
     checkAttendance(count($repository->history($faculty, $offeringId)['sessions']) === 0, 'Reading a sheet must not create absences.');
     attendanceRejects(404, static function () use ($repository, $otherFaculty, $offeringId) { $repository->sheet($otherFaculty, $offeringId); });
     attendanceRejects(404, static function () use ($repository, $otherFaculty, $offeringId) { $repository->history($otherFaculty, $offeringId); });
@@ -63,6 +66,8 @@ try {
     attendanceRejects(409, static function () use ($repository, $faculty, $offeringId, $input) { array_pop($input['entries']); $repository->save($faculty, $offeringId, $input); });
     checkAttendance(count($repository->history($faculty, $offeringId)['sessions']) === 0, 'Invalid saves left partial sessions.');
     $saved = $repository->save($faculty, $offeringId, $input);
+    $names = array_column($saved['students'], null, 'student_id');
+    checkAttendance($names[$studentA]['last_name'] === 'Dela Cruz', 'Saved attendance lost the compound surname.');
     checkAttendance($saved['session']['revision'] === 1 && $saved['date'] === $past, 'Backdating failed.');
     attendanceRejects(409, static function () use ($repository, $faculty, $offeringId, $input) { $repository->save($faculty, $offeringId, $input); });
     $input['revision'] = 1; $input['entries'][1]['status'] = 'present';
@@ -79,6 +84,7 @@ try {
     $repository->save($faculty, $offeringId, $input);
     $history = $repository->history($faculty, $offeringId);
     $totals = array_column($history['students'], null, 'student_id');
+    checkAttendance($totals[$studentA]['first_name'] === 'Ana O.' && $totals[$studentA]['last_name'] === 'Dela Cruz', 'History lost the name parts.');
     checkAttendance(count($history['sessions']) === 2, 'Expected two unique dates.');
     checkAttendance($totals[$studentA]['present'] === 2 && $totals[$studentA]['percentage'] === 100.0, 'Present totals failed.');
     checkAttendance($totals[$studentC]['recorded'] === 1 && !isset($totals[$studentC]['dates'][$past]), 'New enrollment gained historical absences.');

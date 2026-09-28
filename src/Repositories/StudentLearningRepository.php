@@ -294,8 +294,9 @@ final class StudentLearningRepository
         return array_map([$this, 'problemListPayload'], $statement->fetchAll());
     }
 
-    public function problem(int $studentId, int $problemId, string $academicYear, string $academicTerm): array
+    public function problem(int $studentId, int $problemId, string $academicYear, string $academicTerm, int $offeringId = 0): array
     {
+        $offeringScope = $offeringId > 0 ? ' AND fs.id = :offering' : '';
         $statement = $this->db->prepare("SELECT cp.id, cp.code, cp.title, cp.language, cp.difficulty,
             cp.problem_statement, cp.input_format, cp.output_format, cp.constraints_text, cp.starter_code,
             cp.tags, cp.time_limit_ms, cp.memory_limit_mb, cp.created_at, cp.updated_at
@@ -305,9 +306,11 @@ final class StudentLearningRepository
                 INNER JOIN faculty_subjects fs ON fs.id = cps.faculty_subject_id
                 INNER JOIN faculty_subject_students fss ON fss.faculty_subject_id = fs.id
                 WHERE cps.problem_id = cp.id AND fss.student_id = :student AND fs.is_active = 1
-                  AND fs.academic_year = :academic_year AND fs.academic_term = :academic_term
+                  AND fs.academic_year = :academic_year AND fs.academic_term = :academic_term {$offeringScope}
             ) LIMIT 1");
-        $statement->execute(['problem' => $problemId, 'student' => $studentId, 'academic_year' => $academicYear, 'academic_term' => $academicTerm]);
+        $parameters = ['problem' => $problemId, 'student' => $studentId, 'academic_year' => $academicYear, 'academic_term' => $academicTerm];
+        if ($offeringId > 0) $parameters['offering'] = $offeringId;
+        $statement->execute($parameters);
         $row = $statement->fetch();
         if (!$row) throw new HttpException(404, 'Python problem not found in your enrolled subjects.');
 
@@ -321,6 +324,7 @@ final class StudentLearningRepository
             'created_at' => $row['created_at'], 'updated_at' => $row['updated_at'],
         ];
         $problem['subjects'] = $this->problemSubjects($studentId, $problemId, $academicYear, $academicTerm);
+        if ($offeringId > 0) $problem['subjects'] = array_values(array_filter($problem['subjects'], static function (array $subject) use ($offeringId): bool { return $subject['id'] === $offeringId; }));
         $problem['sample_cases'] = $this->sampleCases($problemId);
         return $problem;
     }
