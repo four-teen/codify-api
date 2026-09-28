@@ -37,7 +37,7 @@ final class SubjectAttendanceRepository
     private function roster(int $offeringId): array
     {
         $query = $this->db->prepare("SELECT u.id AS student_id, COALESCE(p.student_number, u.username) AS student_number,
-            u.name AS student_name FROM faculty_subject_students enrollment
+            u.name AS student_name, u.first_name, u.last_name FROM faculty_subject_students enrollment
             INNER JOIN users u ON u.id = enrollment.student_id AND u.role = 'student'
             LEFT JOIN student_profiles p ON p.user_id = u.id
             WHERE enrollment.faculty_subject_id = :offering ORDER BY u.last_name, u.first_name, u.id");
@@ -58,7 +58,10 @@ final class SubjectAttendanceRepository
 
     private function records(int $sessionId): array
     {
-        $query = $this->db->prepare('SELECT student_id, student_number, student_name, status FROM subject_attendance_records WHERE session_id = :session ORDER BY student_name, student_id');
+        // Use name parts only while they still describe the saved name snapshot.
+        $query = $this->db->prepare('SELECT r.student_id, r.student_number, r.student_name, r.status, u.first_name, u.last_name
+            FROM subject_attendance_records r LEFT JOIN users u ON u.id = r.student_id AND u.name = r.student_name
+            WHERE r.session_id = :session ORDER BY r.student_name, r.student_id');
         $query->execute(['session' => $sessionId]);
         return array_map(static function (array $row): array { $row['student_id'] = (int) $row['student_id']; return $row; }, $query->fetchAll());
     }
@@ -84,20 +87,24 @@ final class SubjectAttendanceRepository
         $sessions = array_map(static function (array $row): array {
             foreach (['id', 'revision', 'total', 'present', 'absent'] as $key) $row[$key] = (int) $row[$key]; return $row;
         }, $query->fetchAll());
-        $query = $this->db->prepare('SELECT r.*, s.attendance_date FROM subject_attendance_records r
-            INNER JOIN subject_attendance_sessions s ON s.id = r.session_id WHERE s.faculty_subject_id = :offering ORDER BY s.attendance_date');
+        $query = $this->db->prepare('SELECT r.*, s.attendance_date, u.first_name, u.last_name FROM subject_attendance_records r
+            INNER JOIN subject_attendance_sessions s ON s.id = r.session_id
+            LEFT JOIN users u ON u.id = r.student_id AND u.name = r.student_name
+            WHERE s.faculty_subject_id = :offering ORDER BY s.attendance_date');
         $query->execute(['offering' => $offeringId]);
         $students = [];
         foreach ($query->fetchAll() as $record) {
             $id = (int) $record['student_id'];
             if (!isset($students[$id])) $students[$id] = ['student_id' => $id, 'present' => 0, 'absent' => 0, 'recorded' => 0, 'dates' => []];
             $students[$id]['student_name'] = $record['student_name']; $students[$id]['student_number'] = $record['student_number'];
+            $students[$id]['first_name'] = $record['first_name']; $students[$id]['last_name'] = $record['last_name'];
             $students[$id][$record['status']]++; $students[$id]['recorded']++;
             $students[$id]['dates'][$record['attendance_date']] = $record['status'];
         }
         foreach ($this->roster($offeringId) as $student) {
             $id = $student['student_id'];
             if (!isset($students[$id])) $students[$id] = ['student_id' => $id, 'student_name' => $student['student_name'],
+                'first_name' => $student['first_name'], 'last_name' => $student['last_name'],
                 'student_number' => $student['student_number'], 'present' => 0, 'absent' => 0, 'recorded' => 0, 'dates' => []];
         }
         $students = array_values($students);

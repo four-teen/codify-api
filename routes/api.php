@@ -91,6 +91,10 @@ return static function ($router, array $controllers): void {
     $router->post($prefix . '/faculty/subject-offerings/{offering}/students/import', [$controllers['faculty_teaching'], 'importStudents']);
     $router->post($prefix . '/faculty/subject-offerings/{offering}/students', [$controllers['faculty_teaching'], 'storeStudent']);
     $router->get($prefix . '/faculty/subject-offerings/{offering}/students/{student}/monitoring', [$controllers['faculty_teaching'], 'studentMonitoring']);
+    $router->get($prefix . '/faculty/subject-offerings/{offering}/students/{student}/view', [$controllers['faculty_student_view'], 'show']);
+    $router->get($prefix . '/faculty/subject-offerings/{offering}/students/{student}/view/problems/{problem}', [$controllers['faculty_student_view'], 'problem']);
+    $router->get($prefix . '/faculty/subject-offerings/{offering}/students/{student}/view/assessments/{assessment}', [$controllers['faculty_student_view'], 'assessment']);
+    $router->get($prefix . '/faculty/subject-offerings/{offering}/students/{student}/view/syllabus', [$controllers['faculty_student_view'], 'syllabus']);
     $router->get($prefix . '/faculty/subject-offerings/{offering}/students/{student}/assessment-retakes', [$controllers['faculty_teaching'], 'studentAssessmentRetakes']);
     $router->post($prefix . '/faculty/subject-offerings/{offering}/students/{student}/assessment-retakes/{assessment}', [$controllers['faculty_teaching'], 'grantStudentAssessmentRetake']);
     $router->post($prefix . '/faculty/subject-offerings/{offering}/students/{student}/password-reset', [$controllers['faculty_teaching'], 'resetStudentPassword']);
