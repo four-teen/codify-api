@@ -97,6 +97,9 @@ return static function ($router, array $controllers): void {
     $router->delete($prefix . '/faculty/subject-offerings/{offering}/students', [$controllers['faculty_teaching'], 'destroyStudents']);
     $router->delete($prefix . '/faculty/subject-offerings/{offering}/students/{student}', [$controllers['faculty_teaching'], 'destroyStudent']);
     $router->get($prefix . '/faculty/subject-offerings/{offering}/grades', [$controllers['subject_gradebook'], 'show']);
+    $router->get($prefix . '/faculty/subject-offerings/{offering}/attendance/history', [$controllers['subject_attendance'], 'history']);
+    $router->get($prefix . '/faculty/subject-offerings/{offering}/attendance', [$controllers['subject_attendance'], 'show']);
+    $router->put($prefix . '/faculty/subject-offerings/{offering}/attendance', [$controllers['subject_attendance'], 'save']);
     $router->patch($prefix . '/faculty/subject-offerings/{offering}/grades/settings', [$controllers['subject_gradebook'], 'updateSettings']);
     $router->post($prefix . '/faculty/subject-offerings/{offering}/grades/items', [$controllers['subject_gradebook'], 'storeItem']);
     $router->patch($prefix . '/faculty/subject-offerings/{offering}/grades/items/{item}', [$controllers['subject_gradebook'], 'updateItem']);

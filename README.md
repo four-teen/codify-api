@@ -51,6 +51,18 @@ Existing installations should import `database/student-assessment-attempts.sql` 
 
 Run `php tests/quiz-retake-smoke.php` to validate quiz locking and faculty retake eligibility against an existing submitted quiz when one is available.
 
+## Faculty subject attendance
+
+Existing installations must import `database/subject-attendance.sql` before deploying the attendance API. The migration adds only `subject_attendance_sessions` and `subject_attendance_records`; both full schemas include these tables for new installations.
+
+Faculty open a subject's Attendance page, choose today or an earlier date, check present students, and save. There is one sheet per subject offering and calendar date. Opening a date never creates records. Dates use the institution's configured timezone; the class date is stored independently from entry timestamps. An unchecked student becomes absent only when the entire sheet is saved. Attendance does not change gradebook calculations.
+
+The faculty-only API requires ownership of the subject offering. `GET /api/v1/faculty/subject-offerings/{offering}/attendance?date=YYYY-MM-DD` returns a sheet; `PUT` to the same path takes `date`, `revision` (0 for a new sheet), optional `notes`, and all `entries` as `{student_id, status}` (`present` or `absent`). Saves are transactional, reject changed rosters/foreign students, and return 409 for stale revisions. The database enforces one date per offering.
+
+`GET /api/v1/faculty/subject-offerings/{offering}/attendance/history` returns saved dates and student totals (`present`, `absent`, `recorded`, `percentage`, and date/status mappings). These totals are available for later gradebook integration; no grading weights or formulas are applied now. Percentages use each student's recorded sessions only. Saved sheets retain student identifiers/names after roster or student-account removal; deleting the subject offering removes its attendance. New sheets use the current roster, including when entering dates before the class list was imported. Saved sheets retain their original student list. This version records one attendance per class per day; separate lecture/lab sessions and previous-term subject navigation are not included.
+
+Run `php tests/subject-attendance-smoke.php` for rollback-only repository and permission checks, and `php tests/subject-attendance-api-smoke.php` against the local API for HTTP tests with temporary fixtures that are removed afterward.
+
 ## Faculty subject gradebook
 
 Existing installations should import `database/subject-gradebook.sql` once before deploying the gradebook API. New installations receive the same additive tables through either full schema. The migration does not alter quiz banks, questions, student submissions, attempt limits, or retake permissions.
