@@ -9,23 +9,17 @@ use Codify\Core\Response;
 use Codify\Repositories\StudentLearningRepository;
 use Codify\Repositories\SystemSettingRepository;
 use Codify\Services\AuthGuard;
-use Codify\Services\CodeExecutionRateLimiter;
-use Codify\Services\Judge0RunnerService;
 use Codify\Services\SyllabusStorageService;
-use Codify\Support\Validator;
 
 final class StudentLearningController
 {
     private $learning;
     private $settings;
     private $guard;
-    private $executionLimiter;
-    private $runner;
-    private $executionLimit;
     private $syllabus;
 
-    public function __construct(StudentLearningRepository $learning, SystemSettingRepository $settings, AuthGuard $guard, CodeExecutionRateLimiter $executionLimiter, Judge0RunnerService $runner, int $executionLimit, SyllabusStorageService $syllabus)
-    { $this->learning = $learning; $this->settings = $settings; $this->guard = $guard; $this->executionLimiter = $executionLimiter; $this->runner = $runner; $this->executionLimit = $executionLimit; $this->syllabus = $syllabus; }
+    public function __construct(StudentLearningRepository $learning, SystemSettingRepository $settings, AuthGuard $guard, SyllabusStorageService $syllabus)
+    { $this->learning = $learning; $this->settings = $settings; $this->guard = $guard; $this->syllabus = $syllabus; }
 
     public function overview(Request $request): void
     {
@@ -84,23 +78,6 @@ final class StudentLearningController
         Response::success($this->learning->problem((int) $student['id'], $this->problemId($request), $term['academic_year'], $term['academic_term']));
     }
 
-    public function runProblem(Request $request): void
-    {
-        $student = $this->student($request); $term = $this->term(); $input = $request->json();
-        $validator = new Validator($input);
-        $code = $this->normalizedText((string) ($input['code'] ?? ''));
-        $stdin = $this->normalizedText((string) ($input['stdin'] ?? ''));
-        if (trim($code) === '') $validator->add('code', 'Enter Python code before running.');
-        if ($this->length($code) > 60000) $validator->add('code', 'Python code may not exceed 60,000 characters.');
-        if ($this->length($stdin) > 20000) $validator->add('stdin', 'Program input may not exceed 20,000 characters.');
-        $validator->throwIfFailed();
-        $problem = $this->learning->problem((int) $student['id'], $this->problemId($request), $term['academic_year'], $term['academic_term']);
-        $this->executionLimiter->assertAllowed((int) $student['id'], $request->ip(), $this->executionLimit);
-        $this->executionLimiter->hit((int) $student['id'], $request->ip());
-        $result = $this->runner->execute($code, $stdin, (int) $problem['time_limit_ms'], (int) $problem['memory_limit_mb']);
-        Response::success($result, 'Python execution completed.');
-    }
-
     private function filters(Request $request): array
     {
         $difficulty = strtolower(trim((string) $request->query('difficulty', '')));
@@ -117,8 +94,6 @@ final class StudentLearningController
     }
 
     private function student(Request $request): array { return $this->guard->authenticate($request, true, 'student'); }
-    private function normalizedText(string $value): string { return str_replace(["\r\n", "\r"], "\n", $value); }
-    private function length(string $value): int { return function_exists('mb_strlen') ? mb_strlen($value) : strlen($value); }
     private function subjectId(Request $request): int
     {
         $id = filter_var($request->route('subject'), FILTER_VALIDATE_INT);

@@ -14,6 +14,8 @@ final class ProblemBankRepository
 
     public function __construct(PDO $db) { $this->db = $db; }
 
+    public function rubricTemplates(int $faculty): array { return (new ProblemRubricRepository($this->db))->templates($faculty); }
+
     public function offerings(int $facultyId, string $academicYear, string $academicTerm): array
     {
         $statement = $this->db->prepare("SELECT fs.id, fs.subject_id, fs.section, fs.academic_year, fs.academic_term,
@@ -44,6 +46,7 @@ final class ProblemBankRepository
             $parameters['offering'] = $filters['offering_id'];
         }
         $sql = "SELECT cp.*,
+            (SELECT COUNT(*) FROM coding_problem_work work WHERE work.problem_id = cp.id AND work.status = 'submitted') AS answered_count,
             (SELECT COUNT(*) FROM coding_problem_test_cases test_case WHERE test_case.problem_id = cp.id) AS test_cases_count,
             (SELECT COUNT(*) FROM coding_problem_test_cases sample_case WHERE sample_case.problem_id = cp.id AND sample_case.is_sample = 1) AS sample_cases_count,
             (SELECT GROUP_CONCAT(CONCAT(s.code, IF(fs.section = '', '', CONCAT(' / ', fs.section))) ORDER BY s.code, fs.section SEPARATOR ', ')
@@ -77,6 +80,9 @@ final class ProblemBankRepository
         $problem['subjects'] = $this->problemSubjects($problemId);
         $problem['faculty_subject_ids'] = array_map(static function (array $subject): int { return (int) $subject['id']; }, $problem['subjects']);
         $problem['test_cases'] = $this->testCases($problemId);
+        $problem['expected_output'] = implode("\n\n", array_column($problem['test_cases'], 'expected_output'));
+        $problem['show_expected_output'] = count($problem['test_cases']) > 0 && count(array_filter($problem['test_cases'], static function (array $case): bool { return !$case['is_sample']; })) === 0;
+        $problem['rubric'] = (new ProblemRubricRepository($this->db))->problem($problemId);
         return $problem;
     }
 
@@ -91,6 +97,7 @@ final class ProblemBankRepository
             $statement->execute($this->parameters($facultyId, $data));
             $id = (int) $this->db->lastInsertId();
             $this->syncSubjects($id, $subjectIds); $this->replaceTestCases($id, $testCases);
+            if (array_key_exists('rubric', $data)) (new ProblemRubricRepository($this->db))->attach($facultyId, $id, $data['rubric']);
             return $this->problem($facultyId, $id);
         });
     }
@@ -108,6 +115,7 @@ final class ProblemBankRepository
                 is_active = :is_active, updated_at = NOW() WHERE id = :id AND faculty_id = :faculty");
             $statement->execute($parameters);
             $this->syncSubjects($problemId, $subjectIds); $this->replaceTestCases($problemId, $testCases);
+            if (array_key_exists('rubric', $data)) (new ProblemRubricRepository($this->db))->attach($facultyId, $problemId, $data['rubric']);
             return $this->problem($facultyId, $problemId);
         });
     }
@@ -185,7 +193,7 @@ final class ProblemBankRepository
 
     private function problemListPayload(array $row): array
     {
-        return ['id' => (int) $row['id'], 'code' => $row['code'], 'title' => $row['title'], 'language' => $row['language'], 'difficulty' => $row['difficulty'], 'tags' => $row['tags'], 'time_limit_ms' => (int) $row['time_limit_ms'], 'memory_limit_mb' => (int) $row['memory_limit_mb'], 'is_active' => (bool) $row['is_active'], 'test_cases_count' => (int) $row['test_cases_count'], 'sample_cases_count' => (int) $row['sample_cases_count'], 'subject_labels' => $row['subject_labels'] ?: '', 'created_at' => $row['created_at'], 'updated_at' => $row['updated_at']];
+        return ['answered_count' => (int) ($row['answered_count'] ?? 0), 'id' => (int) $row['id'], 'code' => $row['code'], 'title' => $row['title'], 'language' => $row['language'], 'difficulty' => $row['difficulty'], 'tags' => $row['tags'], 'time_limit_ms' => (int) $row['time_limit_ms'], 'memory_limit_mb' => (int) $row['memory_limit_mb'], 'is_active' => (bool) $row['is_active'], 'test_cases_count' => (int) $row['test_cases_count'], 'sample_cases_count' => (int) $row['sample_cases_count'], 'subject_labels' => $row['subject_labels'] ?: '', 'created_at' => $row['created_at'], 'updated_at' => $row['updated_at']];
     }
 
     private function problemPayload(array $row): array

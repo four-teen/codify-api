@@ -162,6 +162,9 @@ final class SubjectGradebookRepository
                 if ($item['source_type'] === 'assessment') {
                     throw new HttpException(422, 'Quiz and exam scores are calculated automatically and cannot be changed in the gradebook.');
                 }
+                if ($item['source_type'] === 'problem' && $item['problem_rubric_id'] !== null && $entry['status'] !== 'ungraded') {
+                    throw new HttpException(422, 'Python problem scores come from the finalized rubric and cannot be changed in the gradebook.');
+                }
                 $select->execute(['item' => $itemId, 'student' => $studentId]); $previous = $select->fetch() ?: null;
                 if ($entry['status'] === 'ungraded') {
                     $delete->execute(['item' => $itemId, 'student' => $studentId]);
@@ -183,6 +186,7 @@ final class SubjectGradebookRepository
         $entries = []; $statement = $this->db->prepare("SELECT entry.* FROM student_grade_entries entry INNER JOIN subject_grade_items item ON item.id = entry.grade_item_id WHERE item.faculty_subject_id = :offering");
         $statement->execute(['offering' => $offeringId]); foreach ($statement->fetchAll() as $entry) $entries[(int) $entry['grade_item_id']][(int) $entry['student_id']] = $entry;
         $automatic = $this->assessmentScores($offeringId);
+        $rubricScores = $this->problemScores($offeringId);
         $categoryItems = []; foreach ($items as $item) $categoryItems[(int) $item['category_id']][] = $item;
         $studentRows = []; $periodTotals = ['midterm' => [], 'final' => []]; $finalTotals = [];
         foreach ($students as $student) {
@@ -196,6 +200,8 @@ final class SubjectGradebookRepository
                     } else {
                         $scores[$itemId] = ['score' => null, 'status' => 'ungraded', 'source' => 'none', 'remarks' => null];
                     }
+                } elseif ($item['source_type'] === 'problem' && $item['problem_rubric_id'] !== null) {
+                    $scores[$itemId] = $rubricScores[$itemId][$studentId] ?? ['score' => null, 'status' => 'ungraded', 'source' => 'none', 'remarks' => null];
                 } elseif ($entry) {
                     $scores[$itemId] = ['score' => $entry['score'] === null ? null : round((float) $entry['score'], 2), 'status' => $entry['status'], 'source' => 'manual', 'remarks' => $entry['remarks']];
                 } else {
@@ -270,6 +276,26 @@ final class SubjectGradebookRepository
         return $scores;
     }
 
+    private function problemScores(int $offeringId): array
+    {
+        $statement = $this->db->prepare("SELECT item.id AS grade_item_id, work.student_id, evaluation.final_score
+            FROM subject_grade_items item
+            INNER JOIN coding_problem_work work ON work.problem_id = item.coding_problem_id AND work.status = 'submitted'
+            LEFT JOIN coding_problem_evaluations evaluation ON evaluation.problem_id = work.problem_id AND evaluation.student_id = work.student_id
+            WHERE item.faculty_subject_id = :offering AND item.source_type = 'problem'");
+        $statement->execute(['offering' => $offeringId]); $scores = [];
+        foreach ($statement->fetchAll() as $row) {
+            $finalized = $row['final_score'] !== null;
+            $scores[(int) $row['grade_item_id']][(int) $row['student_id']] = [
+                'score' => $finalized ? round((float) $row['final_score'], 2) : null,
+                'status' => $finalized ? 'graded' : 'pending',
+                'source' => 'rubric',
+                'remarks' => null,
+            ];
+        }
+        return $scores;
+    }
+
     private function ensureDefaults(int $offeringId, int $facultyId): void
     {
         $this->db->prepare('INSERT IGNORE INTO subject_grading_settings (faculty_subject_id, base_grade, transmutation_span, midterm_status, final_status, updated_by, created_at, updated_at) VALUES (:offering, 40, 60, \'draft\', \'draft\', :faculty, NOW(), NOW())')->execute(['offering' => $offeringId, 'faculty' => $facultyId]);
@@ -286,11 +312,16 @@ final class SubjectGradebookRepository
             WHERE item.faculty_subject_id = :offering AND item.source_type = 'assessment'");
         $assessment->execute(['offering' => $offeringId]);
         $problem = $this->db->prepare("UPDATE subject_grade_items item INNER JOIN coding_problems problem ON problem.id = item.coding_problem_id
-            SET item.title = CONCAT(problem.code, ' - ', problem.title),
-                item.max_points = GREATEST(1, COALESCE((SELECT SUM(test.points) FROM coding_problem_test_cases test WHERE test.problem_id = problem.id), 0)),
-                item.updated_at = NOW()
+            SET item.title = CONCAT(problem.code, ' - ', problem.title), item.updated_at = NOW()
             WHERE item.faculty_subject_id = :offering AND item.source_type = 'problem'");
         $problem->execute(['offering' => $offeringId]);
+        $problemItems = $this->db->prepare("SELECT id, coding_problem_id FROM subject_grade_items WHERE faculty_subject_id = :offering AND source_type = 'problem'");
+        $problemItems->execute(['offering' => $offeringId]);
+        $updateMaximum = $this->db->prepare('UPDATE subject_grade_items SET max_points = :maximum, updated_at = NOW() WHERE id = :id AND faculty_subject_id = :offering');
+        foreach ($problemItems->fetchAll() as $item) {
+            $maximum = $this->problemRubricMaximumPoints((int) $item['coding_problem_id']);
+            if ($maximum !== null) $updateMaximum->execute(['maximum' => $maximum, 'id' => $item['id'], 'offering' => $offeringId]);
+        }
         $this->db->prepare("DELETE item FROM subject_grade_items item WHERE item.faculty_subject_id = :offering AND item.source_type = 'assessment' AND NOT EXISTS (SELECT 1 FROM assessment_bank_subjects link WHERE link.faculty_subject_id = item.faculty_subject_id AND link.assessment_bank_id = item.assessment_bank_id)")->execute(['offering' => $offeringId]);
         $this->db->prepare("DELETE item FROM subject_grade_items item WHERE item.faculty_subject_id = :offering AND item.source_type = 'problem' AND NOT EXISTS (SELECT 1 FROM coding_problem_subjects link WHERE link.faculty_subject_id = item.faculty_subject_id AND link.problem_id = item.coding_problem_id)")->execute(['offering' => $offeringId]);
     }
@@ -304,13 +335,14 @@ final class SubjectGradebookRepository
                 WHERE link.faculty_subject_id = :offering AND bank.id = :source LIMIT 1");
         } else {
             $statement = $this->db->prepare("SELECT problem.id, CONCAT(problem.code, ' - ', problem.title) AS title,
-                GREATEST(1, COALESCE((SELECT SUM(test.points) FROM coding_problem_test_cases test WHERE test.problem_id = problem.id), 0)) AS max_points
+                100.00 AS max_points
                 FROM coding_problem_subjects link INNER JOIN coding_problems problem ON problem.id = link.problem_id
                 WHERE link.faculty_subject_id = :offering AND problem.id = :source LIMIT 1");
         }
         $statement->execute(['offering' => $offeringId, 'source' => $sourceId]); $activity = $statement->fetch();
         if (!$activity) throw new HttpException(422, 'The selected activity does not belong to this subject.');
-        return ['id' => (int) $activity['id'], 'title' => $activity['title'], 'max_points' => (float) $activity['max_points']];
+        $maximum = $sourceType === 'problem' ? $this->problemRubricMaximumPoints((int) $activity['id']) : null;
+        return ['id' => (int) $activity['id'], 'title' => $activity['title'], 'max_points' => $maximum ?? (float) $activity['max_points']];
     }
 
     private function availableActivities(int $offeringId): array
@@ -326,18 +358,20 @@ final class SubjectGradebookRepository
             UNION ALL
             SELECT 'problem' AS source_type, problem.id AS source_id, 'coding' AS activity_type,
                 problem.code, problem.title, problem.is_active,
-                GREATEST(1, COALESCE((SELECT SUM(test.points) FROM coding_problem_test_cases test WHERE test.problem_id = problem.id), 0)) AS max_points,
-                'manual' AS results_mode, 0 AS results_count
+                100.00 AS max_points,
+                'manual' AS results_mode,
+                (SELECT COUNT(*) FROM coding_problem_evaluations evaluation INNER JOIN coding_problem_work work ON work.student_id = evaluation.student_id AND work.problem_id = evaluation.problem_id AND work.status = 'submitted' WHERE evaluation.problem_id = problem.id AND evaluation.final_score IS NOT NULL) AS results_count
             FROM coding_problem_subjects link INNER JOIN coding_problems problem ON problem.id = link.problem_id
             WHERE link.faculty_subject_id = :problem_offering
                 AND NOT EXISTS (SELECT 1 FROM subject_grade_items item WHERE item.faculty_subject_id = link.faculty_subject_id AND item.coding_problem_id = problem.id)
             ORDER BY activity_type, code, title");
         $statement->execute(['assessment_offering' => $offeringId, 'problem_offering' => $offeringId]);
-        return array_map(static function (array $row): array {
+        return array_map(function (array $row): array {
+            $rubricMaximum = $row['source_type'] === 'problem' ? $this->problemRubricMaximumPoints((int) $row['source_id']) : null;
             return [
                 'source_type' => $row['source_type'], 'source_id' => (int) $row['source_id'], 'activity_type' => $row['activity_type'],
-                'code' => $row['code'], 'title' => $row['title'], 'is_active' => (bool) $row['is_active'], 'max_points' => (float) $row['max_points'],
-                'results_mode' => $row['results_mode'], 'results_count' => (int) $row['results_count'],
+                'code' => $row['code'], 'title' => $row['title'], 'is_active' => (bool) $row['is_active'], 'max_points' => $rubricMaximum ?? (float) $row['max_points'],
+                'results_mode' => $rubricMaximum !== null ? 'rubric' : $row['results_mode'], 'results_count' => (int) $row['results_count'],
             ];
         }, $statement->fetchAll());
     }
@@ -365,9 +399,10 @@ final class SubjectGradebookRepository
     private function items(int $offeringId): array
     {
         $statement = $this->db->prepare("SELECT item.*, category.grading_period, category.category_key, category.name AS category_name, category.weight AS category_weight,
-            bank.bank_type, bank.code AS assessment_code, problem.code AS problem_code
+            bank.bank_type, bank.code AS assessment_code, problem.code AS problem_code, problem_rubric.problem_id AS problem_rubric_id
             FROM subject_grade_items item INNER JOIN subject_grade_categories category ON category.id = item.category_id
             LEFT JOIN assessment_banks bank ON bank.id = item.assessment_bank_id LEFT JOIN coding_problems problem ON problem.id = item.coding_problem_id
+            LEFT JOIN coding_problem_rubrics problem_rubric ON problem_rubric.problem_id = item.coding_problem_id
             WHERE item.faculty_subject_id = :offering ORDER BY FIELD(category.grading_period, 'midterm', 'final'), category.position, item.position, item.title, item.id");
         $statement->execute(['offering' => $offeringId]); return $statement->fetchAll();
     }
@@ -394,7 +429,23 @@ final class SubjectGradebookRepository
     { return ['id' => (int) $category['id'], 'grading_period' => $category['grading_period'], 'category_key' => $category['category_key'], 'name' => $category['name'], 'weight' => (float) $category['weight'], 'position' => (int) $category['position'], 'items_count' => $itemsCount]; }
 
     private function itemPayload(array $item): array
-    { return ['id' => (int) $item['id'], 'category_id' => (int) $item['category_id'], 'grading_period' => $item['grading_period'], 'category_key' => $item['category_key'], 'category_name' => $item['category_name'], 'source_type' => $item['source_type'], 'source_id' => $item['assessment_bank_id'] !== null ? (int) $item['assessment_bank_id'] : ($item['coding_problem_id'] !== null ? (int) $item['coding_problem_id'] : null), 'bank_type' => $item['bank_type'], 'title' => $item['title'], 'max_points' => (float) $item['max_points'], 'counts_toward_grade' => (bool) $item['counts_toward_grade'], 'due_at' => $item['due_at'], 'position' => (int) $item['position']]; }
+    { return ['id' => (int) $item['id'], 'category_id' => (int) $item['category_id'], 'grading_period' => $item['grading_period'], 'category_key' => $item['category_key'], 'category_name' => $item['category_name'], 'source_type' => $item['source_type'], 'source_id' => $item['assessment_bank_id'] !== null ? (int) $item['assessment_bank_id'] : ($item['coding_problem_id'] !== null ? (int) $item['coding_problem_id'] : null), 'bank_type' => $item['bank_type'], 'rubric_enabled' => $item['problem_rubric_id'] !== null, 'title' => $item['title'], 'max_points' => (float) $item['max_points'], 'counts_toward_grade' => (bool) $item['counts_toward_grade'], 'due_at' => $item['due_at'], 'position' => (int) $item['position']]; }
+
+    private function problemRubricMaximumPoints(int $problemId): ?float
+    {
+        $statement = $this->db->prepare('SELECT criteria_json FROM coding_problem_rubrics WHERE problem_id = ? LIMIT 1');
+        $statement->execute([$problemId]); $json = $statement->fetchColumn();
+        if (!is_string($json) || $json === '') return null;
+        $criteria = json_decode($json, true);
+        if (!is_array($criteria)) return null;
+        $total = 0.0;
+        foreach ($criteria as $criterion) {
+            if (!is_array($criterion)) continue;
+            $points = $criterion['max_points'] ?? null;
+            if (is_numeric($points) && is_finite((float) $points) && (float) $points > 0) $total += (float) $points;
+        }
+        return $total > 0 ? round($total, 2) : null;
+    }
 
     private function legend(float $score): array
     {

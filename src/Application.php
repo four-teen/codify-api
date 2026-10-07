@@ -42,10 +42,8 @@ use Codify\Repositories\TokenRepository;
 use Codify\Repositories\UserRepository;
 use Codify\Services\AuthGuard;
 use Codify\Services\AuthService;
-use Codify\Services\CodeExecutionRateLimiter;
 use Codify\Services\DeviceCredentialVerifier;
 use Codify\Services\DeviceFingerprintService;
-use Codify\Services\Judge0RunnerService;
 use Codify\Services\LoginRateLimiter;
 use Codify\Services\SyllabusStorageService;
 use PDO;
@@ -76,12 +74,11 @@ final class Application
         $administratorAuditLogs = new AdministratorAuditLogRepository($this->db);
         $administratorDataCleanup = new AdministratorDataCleanupRepository($this->db);
         $fingerprints = new DeviceFingerprintService();
-        $runnerConfig = require dirname(__DIR__) . '/config/runner.php';
-        $runner = new Judge0RunnerService($runnerConfig);
         $syllabus = new SyllabusStorageService(require dirname(__DIR__) . '/config/syllabus.php');
-        $executionLimiter = new CodeExecutionRateLimiter($this->db);
         $authService = new AuthService($users, $tokens, $settings, new LoginRateLimiter($this->db), $studentLoginEvents);
         $controllers = [
+            'problem_rubrics' => new \Codify\Controllers\ProblemRubricController(new \Codify\Repositories\ProblemRubricRepository($this->db), $guard),
+            'problem_work' => new \Codify\Controllers\ProblemWorkController(new \Codify\Repositories\ProblemWorkRepository($this->db), $studentLearning, $settings, $guard),
             'auth' => new AuthController($authService, $guard, $users, $tokens),
             'settings' => new SystemSettingController($settings, $guard),
             'workspace' => new WorkspaceController($guard, $users, $scopes, require dirname(__DIR__) . '/config/codify.php'),
@@ -92,7 +89,7 @@ final class Application
             'faculty_teaching' => new FacultyTeachingController($teaching, $users, $tokens, $settings, $guard, $syllabus),
             'faculty_student_view' => new FacultyStudentViewController($teaching, $studentLearning, $settings, $guard, $syllabus),
             'problem_bank' => new ProblemBankController($problems, $settings, $guard),
-            'student_learning' => new StudentLearningController($studentLearning, $settings, $guard, $executionLimiter, $runner, (int) $runnerConfig['rate_limit_per_minute'], $syllabus),
+            'student_learning' => new StudentLearningController($studentLearning, $settings, $guard, $syllabus),
             'subject_gradebook' => new SubjectGradebookController($subjectGradebooks, $guard),
             'subject_attendance' => new SubjectAttendanceController(new SubjectAttendanceRepository($this->db), $guard),
             'student_devices' => new StudentDeviceController($deviceConsistency, $settings, $tokens, $guard, $fingerprints, new DeviceCredentialVerifier()),
