@@ -1,0 +1,15 @@
+{
+    "database": "codify_db",
+    "server": "5.7.25",
+    "live_count": 43,
+    "local_count": 48,
+    "new_tables": [
+        "coding_problem_evaluations",
+        "coding_problem_rubrics",
+        "coding_problem_work",
+        "coding_problem_work_events",
+        "coding_rubric_templates"
+    ],
+    "live_only_tables": [],
+    "changed_tables": []
+}

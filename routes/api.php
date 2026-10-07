@@ -51,6 +51,12 @@ return static function ($router, array $controllers): void {
 
     $router->get($prefix . '/faculty/subjects', [$controllers['faculty_subjects'], 'index']);
     $router->get($prefix . '/faculty/problem-bank', [$controllers['problem_bank'], 'index']);
+    $router->get($prefix . '/faculty/rubric-templates', [$controllers['problem_rubrics'], 'templates']);
+    $router->post($prefix . '/faculty/rubric-templates', [$controllers['problem_rubrics'], 'saveTemplate']);
+    $router->patch($prefix . '/faculty/rubric-templates/{template}', [$controllers['problem_rubrics'], 'saveTemplate']);
+    $router->delete($prefix . '/faculty/rubric-templates/{template}', [$controllers['problem_rubrics'], 'deleteTemplate']);
+    $router->post($prefix . '/faculty/problem-bank/{problem}/responses/{student}/initial-score', [$controllers['problem_rubrics'], 'generate']);
+    $router->put($prefix . '/faculty/problem-bank/{problem}/responses/{student}/final-score', [$controllers['problem_rubrics'], 'finalize']);
     $router->post($prefix . '/faculty/problem-bank', [$controllers['problem_bank'], 'store']);
     $router->get($prefix . '/faculty/problem-bank/{problem}', [$controllers['problem_bank'], 'show']);
     $router->patch($prefix . '/faculty/problem-bank/{problem}', [$controllers['problem_bank'], 'update']);
@@ -71,7 +77,9 @@ return static function ($router, array $controllers): void {
     $router->post($prefix . '/student/subjects/{subject}/assessments/{assessment}/submit', [$controllers['student_learning'], 'submitAssessment']);
     $router->get($prefix . '/student/problems', [$controllers['student_learning'], 'problems']);
     $router->get($prefix . '/student/problems/{problem}', [$controllers['student_learning'], 'showProblem']);
-    $router->post($prefix . '/student/problems/{problem}/run', [$controllers['student_learning'], 'runProblem']);
+    $router->get($prefix . '/student/problems/{problem}/work', [$controllers['problem_work'], 'state']);
+    $router->post($prefix . '/student/problems/{problem}/work/{action}', [$controllers['problem_work'], 'act']);
+    $router->get($prefix . '/faculty/problem-bank/{problem}/responses', [$controllers['problem_work'], 'responses']);
     $router->get($prefix . '/student/device-consistency', [$controllers['student_devices'], 'overview']);
     $router->post($prefix . '/student/device-consistency/consent', [$controllers['student_devices'], 'consent']);
     $router->post($prefix . '/student/device-consistency/decline', [$controllers['student_devices'], 'decline']);

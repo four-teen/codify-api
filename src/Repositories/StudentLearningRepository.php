@@ -326,6 +326,13 @@ final class StudentLearningRepository
         $problem['subjects'] = $this->problemSubjects($studentId, $problemId, $academicYear, $academicTerm);
         if ($offeringId > 0) $problem['subjects'] = array_values(array_filter($problem['subjects'], static function (array $subject) use ($offeringId): bool { return $subject['id'] === $offeringId; }));
         $problem['sample_cases'] = $this->sampleCases($problemId);
+        // Only visible output rows reach the student response; hidden output stays faculty-only.
+        $problem['expected_output'] = implode("\n\n", array_column($problem['sample_cases'], 'expected_output'));
+        $rubrics = new ProblemRubricRepository($this->db);
+        $evaluation = $rubrics->evaluation($studentId, $problemId);
+        $problem['rubric'] = $evaluation['rubric'] ?? $rubrics->problem($problemId);
+        $problem['final_score'] = $evaluation['final_score'] ?? null;
+        $problem['faculty_feedback'] = $evaluation['feedback'] ?? null;
         return $problem;
     }
 

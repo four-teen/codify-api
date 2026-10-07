@@ -75,6 +75,7 @@ try {
         $expect($call('GET', $path . $resource, $otherToken), 404);
         $expect($call('GET', str_replace('/students/' . $student, '/students/' . $outsider, $path) . $resource, $ownerToken), 404);
     }
+    $expect($call('GET', '/faculty/problem-bank/' . $problem . '/responses', $studentToken), 403);
     $snapshot = static function () use ($db, $student): array {
         $result = [];
         foreach (['student_assessment_attempts', 'student_assessment_retake_permissions', 'student_device_events'] as $table) {
@@ -104,7 +105,11 @@ try {
     $expect($call('POST', $path . '/assessments/' . $quiz . '/submit', $ownerToken), 404);
     $expect($call('POST', $path . '/problems/' . $problem . '/run', $ownerToken), 404);
     $expect($call('POST', '/student/subjects/' . $offering . '/assessments/' . $quiz . '/submit', $ownerToken), 403);
-    $expect($call('POST', '/student/problems/' . $problem . '/run', $ownerToken), 403);
+    $expect($call('POST', '/student/problems/' . $problem . '/run', $ownerToken), 404);
+    $expect($call('GET', '/student/problems/' . $problem . '/work', $ownerToken), 403);
+    $expect($call('POST', '/student/problems/' . $problem . '/work/start', $ownerToken), 403);
+    $expect($call('GET', '/faculty/problem-bank/' . $problem . '/responses', $otherToken), 404);
+    $expect($call('GET', '/faculty/problem-bank/' . $problem . '/responses', $ownerToken), 200);
     previewCheck($snapshot() === $before, 'Preview changed student records, events, or sessions.');
     // Availability and membership are checked again, including direct content URLs.
     $db->prepare('UPDATE faculty_subjects SET is_active = 0 WHERE id = ?')->execute([$offering]);

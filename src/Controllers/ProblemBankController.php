@@ -29,6 +29,7 @@ final class ProblemBankController
             'offerings' => $this->problems->offerings((int) $faculty['id'], $settings['academic_year'], $settings['academic_term']),
             'metrics' => $this->problems->metrics((int) $faculty['id']),
             'filters' => $filters,
+            'rubric_templates' => $this->problems->rubricTemplates((int) $faculty['id']),
         ]);
     }
 
@@ -38,6 +39,7 @@ final class ProblemBankController
     public function store(Request $request): void
     {
         $faculty = $this->faculty($request); $payload = $this->payload($request->json()); $settings = $this->settings->current();
+        if (array_key_exists('rubric', $request->json())) $payload['problem']['rubric'] = $request->json()['rubric'];
         $problem = $this->problems->create((int) $faculty['id'], $payload['problem'], $payload['subject_ids'], $payload['test_cases'], $settings['academic_year'], $settings['academic_term']);
         Response::success($problem, 'Python problem created.', 201);
     }
@@ -45,6 +47,7 @@ final class ProblemBankController
     public function update(Request $request): void
     {
         $faculty = $this->faculty($request); $payload = $this->payload($request->json()); $settings = $this->settings->current();
+        if (array_key_exists('rubric', $request->json())) $payload['problem']['rubric'] = $request->json()['rubric'];
         $problem = $this->problems->update((int) $faculty['id'], $this->problemId($request), $payload['problem'], $payload['subject_ids'], $payload['test_cases'], $settings['academic_year'], $settings['academic_term']);
         Response::success($problem, 'Python problem updated.');
     }
@@ -83,7 +86,13 @@ final class ProblemBankController
         if ($code !== '' && preg_match('/^[A-Z0-9._-]+$/', $code) !== 1) $validator->add('code', 'The problem code may contain only letters, numbers, dots, underscores, and hyphens.');
         $subjectIds = $this->positiveIds($input['faculty_subject_ids'] ?? null, $validator);
         $testCases = $this->testCases($input['test_cases'] ?? null, $validator);
-        if ($active && count($testCases) < 1) $validator->add('test_cases', 'An active problem requires at least one test case.');
+        if (array_key_exists('expected_output', $input)) {
+            $expectedOutput = $this->normalizedText((string) ($input['expected_output'] ?? ''));
+            if ($this->length($expectedOutput) > 20000) $validator->add('expected_output', 'Expected output may not exceed 20000 characters.');
+            $showExpectedOutput = $validator->boolean('show_expected_output', false);
+            // Reuse the existing output storage and its server-side visibility filter.
+            $testCases = trim($expectedOutput) === '' ? [] : [['input_data' => '', 'expected_output' => $this->normalizedText($expectedOutput), 'is_sample' => $showExpectedOutput, 'points' => 1]];
+        }
         $validator->throwIfFailed();
         return ['problem' => ['code' => $code, 'title' => $title, 'language' => $language, 'difficulty' => $difficulty, 'problem_statement' => $statement, 'input_format' => $inputFormat, 'output_format' => $outputFormat, 'constraints_text' => $constraints, 'starter_code' => $starterCode, 'reference_solution' => $referenceSolution, 'solution_notes' => $solutionNotes, 'tags' => $tags, 'time_limit_ms' => $timeLimit, 'memory_limit_mb' => $memoryLimit, 'is_active' => $active], 'subject_ids' => $subjectIds, 'test_cases' => $testCases];
     }
